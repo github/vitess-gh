@@ -82,6 +82,12 @@ var (
 	// lockHeartbeatTime is used to set the next heartbeat time.
 	lockHeartbeatTime = flag.Duration("lock_heartbeat_time", 5*time.Second, "If there is lock function used. This will keep the lock connection active by using this heartbeat")
 	warnShardedOnly   = flag.Bool("warn_sharded_only", false, "If any features that are only available in unsharded mode are used, query execution warnings will be added to the session")
+
+	foreignKeyMode = flag.String("foreign_key_mode", "allow", "This is to provide how to handle foreign key constraint in create/alter table. Valid values are: allow, disallow")
+
+	// flags to enable/disable online and direct DDL statements
+	enableOnlineDDL = flag.Bool("enable_online_ddl", true, "Allow users to submit, review and control Online DDL")
+	enableDirectDDL = flag.Bool("enable_direct_ddl", true, "Allow users to submit direct DDL statements")
 )
 
 func getTxMode() vtgatepb.TransactionMode {
@@ -170,7 +176,7 @@ func Init(ctx context.Context, serv srvtopo.Server, cell string, tabletTypesToWa
 
 	// If we want to filter keyspaces replace the srvtopo.Server with a
 	// filtering server
-	if len(discovery.KeyspacesToWatch) > 0 {
+	if discovery.FilteringKeyspaces() {
 		log.Infof("Keyspace filtering enabled, selecting %v", discovery.KeyspacesToWatch)
 		var err error
 		serv, err = srvtopo.NewKeyspaceFilteringServer(serv, discovery.KeyspacesToWatch)
@@ -179,7 +185,7 @@ func Init(ctx context.Context, serv srvtopo.Server, cell string, tabletTypesToWa
 		}
 	}
 
-	if _, _, err := schema.ParseDDLStrategy(*defaultDDLStrategy); err != nil {
+	if _, err := schema.ParseDDLStrategy(*defaultDDLStrategy); err != nil {
 		log.Fatalf("Invalid value for -ddl_strategy: %v", err.Error())
 	}
 	tc := NewTxConn(gw, getTxMode())
@@ -349,7 +355,7 @@ func (vtg *VTGate) StreamExecute(ctx context.Context, session *vtgatepb.Session,
 			NewSafeSession(session),
 			sql,
 			bindVariables,
-			querypb.Target{
+			&querypb.Target{
 				Keyspace:   destKeyspace,
 				TabletType: destTabletType,
 			},
@@ -462,6 +468,17 @@ func recordAndAnnotateError(err error, statsKey []string, request map[string]int
 		logger.Errorf("%v, request: %+v", err, request)
 	case vtrpcpb.Code_UNAVAILABLE:
 		logger.Infof("%v, request: %+v", err, request)
+	case vtrpcpb.Code_UNIMPLEMENTED:
+		sql, exists := request["Sql"]
+		if !exists {
+			return err
+		}
+		piiSafeSQL, err2 := sqlparser.RedactSQLQuery(sql.(string))
+		if err2 != nil {
+			return err
+		}
+		// log only if sql query present and able to successfully redact the PII.
+		logger.Infof("unsupported query: %q", piiSafeSQL)
 	}
 	return err
 }
@@ -503,7 +520,7 @@ func LegacyInit(ctx context.Context, hc discovery.LegacyHealthCheck, serv srvtop
 
 	// If we want to filter keyspaces replace the srvtopo.Server with a
 	// filtering server
-	if len(discovery.KeyspacesToWatch) > 0 {
+	if discovery.FilteringKeyspaces() {
 		log.Infof("Keyspace filtering enabled, selecting %v", discovery.KeyspacesToWatch)
 		var err error
 		serv, err = srvtopo.NewKeyspaceFilteringServer(serv, discovery.KeyspacesToWatch)

@@ -57,6 +57,24 @@ const (
 	alterSchemaMigrationsTableTableCompleteIndex = "ALTER TABLE _vt.schema_migrations add KEY table_complete_idx (migration_status, keyspace(64), mysql_table(64), completed_timestamp)"
 	alterSchemaMigrationsTableETASeconds         = "ALTER TABLE _vt.schema_migrations add column eta_seconds bigint NOT NULL DEFAULT -1"
 
+	sqlInsertMigration = `INSERT IGNORE INTO _vt.schema_migrations (
+		migration_uuid,
+		keyspace,
+		shard,
+		mysql_schema,
+		mysql_table,
+		migration_statement,
+		strategy,
+		options,
+		ddl_action,
+		requested_timestamp,
+		migration_context,
+		migration_status,
+		tablet
+	) VALUES (
+		%a, %a, %a, %a, %a, %a, %a, %a, %a, FROM_UNIXTIME(NOW()), %a, %a, %a
+	)`
+
 	sqlScheduleSingleMigration = `UPDATE _vt.schema_migrations
 		SET
 			migration_status='ready',
@@ -230,7 +248,8 @@ const (
 			retries,
 			ddl_action,
 			artifacts,
-			tablet
+			tablet,
+			migration_context
 		FROM _vt.schema_migrations
 		WHERE
 			migration_uuid=%a
@@ -255,7 +274,8 @@ const (
 			retries,
 			ddl_action,
 			artifacts,
-			tablet
+			tablet,
+			migration_context
 		FROM _vt.schema_migrations
 		WHERE
 			migration_status='ready'
@@ -274,6 +294,7 @@ const (
 	sqlDropTrigger       = "DROP TRIGGER IF EXISTS `%a`.`%a`"
 	sqlShowTablesLike    = "SHOW TABLES LIKE '%a'"
 	sqlCreateTableLike   = "CREATE TABLE `%a` LIKE `%a`"
+	sqlDropTable         = "DROP TABLE `%a`"
 	sqlAlterTableOptions = "ALTER TABLE `%a` %s"
 	sqlShowColumnsFrom   = "SHOW COLUMNS FROM `%a`"
 	sqlStartVReplStream  = "UPDATE _vt.vreplication set state='Running' where db_name=%a and workflow=%a"
@@ -314,8 +335,11 @@ var (
 		`CREATE USER IF NOT EXISTS %s IDENTIFIED BY '%s'`,
 		`ALTER USER %s IDENTIFIED BY '%s'`,
 	}
+	sqlGrantOnlineDDLSuper = []string{
+		`GRANT SUPER ON *.* TO %s`,
+	}
 	sqlGrantOnlineDDLUser = []string{
-		`GRANT SUPER, REPLICATION SLAVE ON *.* TO %s`,
+		`GRANT PROCESS, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO %s`,
 		`GRANT ALTER, CREATE, DELETE, DROP, INDEX, INSERT, LOCK TABLES, SELECT, TRIGGER, UPDATE ON *.* TO %s`,
 	}
 	sqlDropOnlineDDLUser = `DROP USER IF EXISTS %s`

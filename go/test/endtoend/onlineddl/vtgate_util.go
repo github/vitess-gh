@@ -107,7 +107,7 @@ func CheckCancelAllMigrations(t *testing.T, vtParams *mysql.ConnParams, expectCo
 }
 
 // CheckMigrationStatus verifies that the migration indicated by given UUID has the given expected status
-func CheckMigrationStatus(t *testing.T, vtParams *mysql.ConnParams, shards []cluster.Shard, uuid string, expectStatus schema.OnlineDDLStatus) {
+func CheckMigrationStatus(t *testing.T, vtParams *mysql.ConnParams, shards []cluster.Shard, uuid string, expectStatuses ...schema.OnlineDDLStatus) {
 	showQuery := fmt.Sprintf("show vitess_migrations like '%s'", uuid)
 	r := VtgateExecQuery(t, vtParams, showQuery, "")
 	fmt.Printf("# output for `%s`:\n", showQuery)
@@ -115,9 +115,27 @@ func CheckMigrationStatus(t *testing.T, vtParams *mysql.ConnParams, shards []clu
 
 	count := 0
 	for _, row := range r.Named().Rows {
-		if row["migration_uuid"].ToString() == uuid && row["migration_status"].ToString() == string(expectStatus) {
-			count++
+		if row["migration_uuid"].ToString() != uuid {
+			continue
+		}
+		for _, expectStatus := range expectStatuses {
+			if row["migration_status"].ToString() == string(expectStatus) {
+				count++
+				break
+			}
 		}
 	}
 	assert.Equal(t, len(shards), count)
+}
+
+// CheckMigrationArtifacts verifies given migration exists, and checks if it has artifacts
+func CheckMigrationArtifacts(t *testing.T, vtParams *mysql.ConnParams, shards []cluster.Shard, uuid string, expectArtifacts bool) {
+	showQuery := fmt.Sprintf("show vitess_migrations like '%s'", uuid)
+	r := VtgateExecQuery(t, vtParams, showQuery, "")
+
+	assert.Equal(t, len(shards), len(r.Named().Rows))
+	for _, row := range r.Named().Rows {
+		hasArtifacts := (row["artifacts"].ToString() != "")
+		assert.Equal(t, expectArtifacts, hasArtifacts)
+	}
 }

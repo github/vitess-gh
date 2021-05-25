@@ -191,6 +191,7 @@ func TestPlan(t *testing.T) {
 	testFile(t, "ddl_cases_no_default_keyspace.txt", testOutputTempDir, vschemaWrapper, false)
 	testFile(t, "flush_cases_no_default_keyspace.txt", testOutputTempDir, vschemaWrapper, false)
 	testFile(t, "show_cases_no_default_keyspace.txt", testOutputTempDir, vschemaWrapper, false)
+	testFile(t, "stream_cases.txt", testOutputTempDir, vschemaWrapper, false)
 }
 
 func TestSysVarSetDisabled(t *testing.T) {
@@ -310,6 +311,10 @@ type vschemaWrapper struct {
 	dest          key.Destination
 	sysVarEnabled bool
 	version       PlannerVersion
+}
+
+func (vw *vschemaWrapper) ForeignKeyMode() string {
+	return "allow"
 }
 
 func (vw *vschemaWrapper) AllKeyspace() ([]*vindexes.Keyspace, error) {

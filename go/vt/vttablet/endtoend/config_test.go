@@ -177,8 +177,6 @@ func TestConsolidatorReplicasOnly(t *testing.T) {
 }
 
 func TestQueryPlanCache(t *testing.T) {
-	t.Helper()
-
 	var cachedPlanSize = int((&tabletserver.TabletPlan{}).CachedSize(true))
 
 	//sleep to avoid race between SchemaChanged event clearing out the plans cache which breaks this test
@@ -190,6 +188,9 @@ func TestQueryPlanCache(t *testing.T) {
 		"ival1": sqltypes.Int64BindVariable(1),
 		"ival2": sqltypes.Int64BindVariable(1),
 	}
+
+	framework.Server.ClearQueryPlanCache()
+
 	client := framework.NewClient()
 	_, _ = client.Execute("select * from vitess_test where intval=:ival1", bindVars)
 	_, _ = client.Execute("select * from vitess_test where intval=:ival1", bindVars)

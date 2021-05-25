@@ -81,7 +81,6 @@ COMMAND ARGUMENT DEFINITIONS
 */
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -94,10 +93,11 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"context"
 
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"vitess.io/vitess/go/cmd/vtctldclient/cli"
 	"vitess.io/vitess/go/flagutil"
@@ -396,14 +396,14 @@ var commands = []commandGroup{
 				"[-concurrency=10] [-include_master=false] <keyspace>",
 				"Reloads the schema on all the tablets in a keyspace."},
 			{"ValidateSchemaShard", commandValidateSchemaShard,
-				"[-exclude_tables=''] [-include-views] <keyspace/shard>",
+				"[-exclude_tables=''] [-include-views] [-include-vschema] <keyspace/shard>",
 				"Validates that the master schema matches all of the replicas."},
 			{"ValidateSchemaKeyspace", commandValidateSchemaKeyspace,
-				"[-exclude_tables=''] [-include-views] [-skip-no-master] <keyspace name>",
+				"[-exclude_tables=''] [-include-views] [-skip-no-master] [-include-vschema] <keyspace name>",
 				"Validates that the master schema from shard 0 matches the schema on all of the other tablets in the keyspace."},
 			{"ApplySchema", commandApplySchema,
-				"[-allow_long_unavailability] [-wait_replicas_timeout=10s] [-ddl_strategy=<ddl_strategy>] [-skip_preflight] {-sql=<sql> || -sql-file=<filename>} <keyspace>",
-				"Applies the schema change to the specified keyspace on every master, running in parallel on all shards. The changes are then propagated to replicas via replication. If -allow_long_unavailability is set, schema changes affecting a large number of rows (and possibly incurring a longer period of unavailability) will not be rejected. ddl_strategy is used to intruct migrations via gh-ost or pt-osc with optional parameters. If -skip_preflight, SQL goes directly to shards without going through sanity checks"},
+				"[-allow_long_unavailability] [-wait_replicas_timeout=10s] [-ddl_strategy=<ddl_strategy>] [-request_context=<unique-request-context>] [-skip_preflight] {-sql=<sql> || -sql-file=<filename>} <keyspace>",
+				"Applies the schema change to the specified keyspace on every master, running in parallel on all shards. The changes are then propagated to replicas via replication. If -allow_long_unavailability is set, schema changes affecting a large number of rows (and possibly incurring a longer period of unavailability) will not be rejected. -ddl_strategy is used to intruct migrations via vreplication, gh-ost or pt-osc with optional parameters. -request_context allows the user to specify a custom request context for online DDL migrations. If -skip_preflight, SQL goes directly to shards without going through sanity checks"},
 			{"CopySchemaShard", commandCopySchemaShard,
 				"[-tables=<table1>,<table2>,...] [-exclude_tables=<table1>,<table2>,...] [-include-views] [-skip-verify] [-wait_replicas_timeout=10s] {<source keyspace/shard> || <source tablet alias>} <destination keyspace/shard>",
 				"Copies the schema from a source shard's master (or a specific tablet) to a destination shard. The schema is applied directly on the master of the destination shard, and it is propagated to the replicas through binlogs."},
@@ -888,6 +888,10 @@ func commandChangeTabletType(ctx context.Context, wr *wrangler.Wrangler, subFlag
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, *topo.RemoteOperationTimeout)
+	defer cancel()
+
 	if *dryRun {
 		ti, err := wr.TopoServer().GetTablet(ctx, tabletAlias)
 		if err != nil {
@@ -2153,7 +2157,7 @@ func commandVRWorkflow(ctx context.Context, wr *wrangler.Wrangler, subFlags *fla
 	case vReplicationWorkflowActionProgress:
 		return printCopyProgress()
 	case vReplicationWorkflowActionCreate:
-		err = wf.Create()
+		err = wf.Create(ctx)
 		if err != nil {
 			return err
 		}
@@ -2331,6 +2335,8 @@ func commandVDiff(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.Fla
 	tabletTypes := subFlags.String("tablet_types", "master,replica,rdonly", "Tablet types for source and target")
 	filteredReplicationWaitTime := subFlags.Duration("filtered_replication_wait_time", 30*time.Second, "Specifies the maximum time to wait, in seconds, for filtered replication to catch up on master migrations. The migration will be cancelled on a timeout.")
 	maxRows := subFlags.Int64("limit", math.MaxInt64, "Max rows to stop comparing after")
+	debugQuery := subFlags.Bool("debug_query", false, "Adds a mysql query to the report that can be used for further debugging")
+	onlyPks := subFlags.Bool("only_pks", false, "When reporting missing rows, only show primary keys in the report.")
 	format := subFlags.String("format", "", "Format of report") //"json" or ""
 	tables := subFlags.String("tables", "", "Only run vdiff for these tables in the workflow")
 	if err := subFlags.Parse(args); err != nil {
@@ -2348,7 +2354,7 @@ func commandVDiff(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.Fla
 		return fmt.Errorf("maximum number of rows to compare needs to be greater than 0")
 	}
 	_, err = wr.
-		VDiff(ctx, keyspace, workflow, *sourceCell, *targetCell, *tabletTypes, *filteredReplicationWaitTime, *format, *maxRows, *tables)
+		VDiff(ctx, keyspace, workflow, *sourceCell, *targetCell, *tabletTypes, *filteredReplicationWaitTime, *format, *maxRows, *tables, *debugQuery, *onlyPks)
 	if err != nil {
 		log.Errorf("vdiff returning with error: %v", err)
 		if strings.Contains(err.Error(), "context deadline exceeded") {
@@ -2768,6 +2774,7 @@ func commandReloadSchemaKeyspace(ctx context.Context, wr *wrangler.Wrangler, sub
 func commandValidateSchemaShard(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.FlagSet, args []string) error {
 	excludeTables := subFlags.String("exclude_tables", "", "Specifies a comma-separated list of tables to exclude. Each is either an exact match, or a regular expression of the form /regexp/")
 	includeViews := subFlags.Bool("include-views", false, "Includes views in the validation")
+	includeVSchema := subFlags.Bool("include-vschema", false, "Validate schemas against the vschema")
 	if err := subFlags.Parse(args); err != nil {
 		return err
 	}
@@ -2783,13 +2790,14 @@ func commandValidateSchemaShard(ctx context.Context, wr *wrangler.Wrangler, subF
 	if *excludeTables != "" {
 		excludeTableArray = strings.Split(*excludeTables, ",")
 	}
-	return wr.ValidateSchemaShard(ctx, keyspace, shard, excludeTableArray, *includeViews)
+	return wr.ValidateSchemaShard(ctx, keyspace, shard, excludeTableArray, *includeViews, *includeVSchema)
 }
 
 func commandValidateSchemaKeyspace(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.FlagSet, args []string) error {
 	excludeTables := subFlags.String("exclude_tables", "", "Specifies a comma-separated list of tables to exclude. Each is either an exact match, or a regular expression of the form /regexp/")
 	includeViews := subFlags.Bool("include-views", false, "Includes views in the validation")
 	skipNoMaster := subFlags.Bool("skip-no-master", false, "Skip shards that don't have master when performing validation")
+	includeVSchema := subFlags.Bool("include-vschema", false, "Validate schemas against the vschema")
 	if err := subFlags.Parse(args); err != nil {
 		return err
 	}
@@ -2802,7 +2810,7 @@ func commandValidateSchemaKeyspace(ctx context.Context, wr *wrangler.Wrangler, s
 	if *excludeTables != "" {
 		excludeTableArray = strings.Split(*excludeTables, ",")
 	}
-	return wr.ValidateSchemaKeyspace(ctx, keyspace, excludeTableArray, *includeViews, *skipNoMaster)
+	return wr.ValidateSchemaKeyspace(ctx, keyspace, excludeTableArray, *includeViews, *skipNoMaster, *includeVSchema)
 }
 
 func commandApplySchema(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.FlagSet, args []string) error {
@@ -2810,6 +2818,7 @@ func commandApplySchema(ctx context.Context, wr *wrangler.Wrangler, subFlags *fl
 	sql := subFlags.String("sql", "", "A list of semicolon-delimited SQL commands")
 	sqlFile := subFlags.String("sql-file", "", "Identifies the file that contains the SQL commands")
 	ddlStrategy := subFlags.String("ddl_strategy", string(schema.DDLStrategyDirect), "Online DDL strategy, compatible with @@ddl_strategy session variable (examples: 'gh-ost', 'pt-osc', 'gh-ost --max-load=Threads_running=100'")
+	requestContext := subFlags.String("request_context", "", "For Only DDL, optionally supply a custom unique string used as context for the migration(s) in this command. By default a unique context is auto-generated by Vitess")
 	waitReplicasTimeout := subFlags.Duration("wait_replicas_timeout", wrangler.DefaultWaitReplicasTimeout, "The amount of time to wait for replicas to receive the schema change via replication.")
 	skipPreflight := subFlags.Bool("skip_preflight", false, "Skip pre-apply schema checks, and dircetly forward schema change query to shards")
 	if err := subFlags.Parse(args); err != nil {
@@ -2828,8 +2837,10 @@ func commandApplySchema(ctx context.Context, wr *wrangler.Wrangler, subFlags *fl
 	if err != nil {
 		return err
 	}
-	requestContext := fmt.Sprintf("vtctl:%s", executionUUID)
-	executor := schemamanager.NewTabletExecutor(requestContext, wr, *waitReplicasTimeout)
+	if *requestContext == "" {
+		*requestContext = fmt.Sprintf("vtctl:%s", executionUUID)
+	}
+	executor := schemamanager.NewTabletExecutor(*requestContext, wr, *waitReplicasTimeout)
 	if *allowLongUnavailability {
 		executor.AllowBigSchemaChange()
 	}
@@ -2837,7 +2848,7 @@ func commandApplySchema(ctx context.Context, wr *wrangler.Wrangler, subFlags *fl
 		executor.SkipPreflight()
 	}
 	if err := executor.SetDDLStrategy(*ddlStrategy); err != nil {
-		return nil
+		return err
 	}
 
 	return schemamanager.Run(
@@ -2930,7 +2941,8 @@ func commandOnlineDDL(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag
 			}
 			requestContext := fmt.Sprintf("vtctl:%s", contextUUID)
 
-			onlineDDL, err := schema.NewOnlineDDL(keyspace, "", fmt.Sprintf("revert %s", uuid), schema.DDLStrategyOnline, "", requestContext)
+			ddlStrategySetting := schema.NewDDLStrategySetting(schema.DDLStrategyOnline, "")
+			onlineDDL, err := schema.NewOnlineDDL(keyspace, "", fmt.Sprintf("revert %s", uuid), ddlStrategySetting, requestContext)
 			if err != nil {
 				return err
 			}
@@ -3319,7 +3331,11 @@ func commandGetSrvKeyspace(ctx context.Context, wr *wrangler.Wrangler, subFlags 
 		return err
 	}
 
-	return printJSON(wr.Logger(), resp.SrvKeyspaces[cell])
+	cellKs := resp.SrvKeyspaces[cell]
+	if cellKs == nil {
+		return fmt.Errorf("missing keyspace %q in cell %q", keyspace, cell)
+	}
+	return printJSON(wr.Logger(), cellKs)
 }
 
 func commandGetSrvVSchema(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.FlagSet, args []string) error {
@@ -3528,82 +3544,12 @@ func commandGenerateShardRanges(ctx context.Context, wr *wrangler.Wrangler, subF
 		return err
 	}
 
-	shardRanges, err := generateShardRanges(*numShards)
+	shardRanges, err := key.GenerateShardRanges(*numShards)
 	if err != nil {
 		return err
 	}
 
 	return printJSON(wr.Logger(), shardRanges)
-}
-
-func generateShardRanges(shards int) ([]string, error) {
-	var format string
-	var maxShards int
-
-	switch {
-	case shards <= 0:
-		return nil, errors.New("shards must be greater than zero")
-	case shards <= 256:
-		format = "%02x"
-		maxShards = 256
-	case shards <= 65536:
-		format = "%04x"
-		maxShards = 65536
-	default:
-		return nil, errors.New("this tool does not support more than 65336 shards in a single keyspace")
-	}
-
-	rangeFormatter := func(start, end int) string {
-		var (
-			startKid string
-			endKid   string
-		)
-
-		if start != 0 {
-			startKid = fmt.Sprintf(format, start)
-		}
-
-		if end != maxShards {
-			endKid = fmt.Sprintf(format, end)
-		}
-
-		return fmt.Sprintf("%s-%s", startKid, endKid)
-	}
-
-	start := 0
-	end := 0
-
-	// If shards does not divide evenly into maxShards, then there is some lossiness,
-	// where each shard is smaller than it should technically be (if, for example, size == 25.6).
-	// If we choose to keep everything in ints, then we have two choices:
-	// 	- Have every shard in #numshards be a uniform size, tack on an additional shard
-	//	  at the end of the range to account for the loss. This is bad because if you ask for
-	//	  7 shards, you'll actually get 7 uniform shards with 1 small shard, for 8 total shards.
-	//	  It's also bad because one shard will have much different data distribution than the rest.
-	//	- Expand the final shard to include whatever is left in the keyrange. This will give the
-	//	  correct number of shards, which is good, but depending on how lossy each individual shard is,
-	//	  you could end with that final shard being significantly larger than the rest of the shards,
-	//	  so this doesn't solve the data distribution problem.
-	//
-	// By tracking the "real" end (both in the real number sense, and in the truthfulness of the value sense),
-	// we can re-truncate the integer end on each iteration, which spreads the lossiness more
-	// evenly across the shards.
-	//
-	// This implementation has no impact on shard numbers that are powers of 2, even at large numbers,
-	// which you can see in the tests.
-	size := float64(maxShards) / float64(shards)
-	realEnd := float64(0)
-	shardRanges := make([]string, 0, shards)
-
-	for i := 1; i <= shards; i++ {
-		realEnd = float64(i) * size
-
-		end = int(realEnd)
-		shardRanges = append(shardRanges, rangeFormatter(start, end))
-		start = end
-	}
-
-	return shardRanges, nil
 }
 
 func commandPanic(ctx context.Context, wr *wrangler.Wrangler, subFlags *flag.FlagSet, args []string) error {
@@ -3616,7 +3562,7 @@ func printJSON(logger logutil.Logger, val interface{}) error {
 	if err != nil {
 		return fmt.Errorf("cannot marshal data: %v", err)
 	}
-	logger.Printf("%v\n", string(data))
+	logger.Printf("%s\n", data)
 	return nil
 }
 
@@ -3641,12 +3587,16 @@ func MarshalJSON(obj interface{}) (data []byte, err error) {
 		// In that case jsonpb may panic if the "obj" has non-exported fields.
 
 		// Marshal the protobuf message.
-		var b bytes.Buffer
-		m := jsonpb.Marshaler{EnumsAsInts: true, EmitDefaults: true, Indent: "  ", OrigName: true}
-		if err := m.Marshal(&b, obj); err != nil {
-			return nil, fmt.Errorf("jsonpb error: %v", err)
+		data, err = protojson.MarshalOptions{
+			Multiline:       true,
+			Indent:          "  ",
+			UseProtoNames:   true,
+			UseEnumNumbers:  true,
+			EmitUnpopulated: true,
+		}.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("protojson error: %v", err)
 		}
-		data = b.Bytes()
 	case []string:
 		if len(obj) == 0 {
 			return []byte{'[', ']'}, nil

@@ -27,7 +27,7 @@ import (
 
 	"context"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 
 	"vitess.io/vitess/go/sqltypes"
 	"vitess.io/vitess/go/vt/hook"
@@ -594,6 +594,17 @@ func tmRPCTestApplySchema(ctx context.Context, t *testing.T, client tmclient.Tab
 func tmRPCTestApplySchemaPanic(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
 	_, err := client.ApplySchema(ctx, tablet, testSchemaChange)
 	expectHandleRPCPanic(t, "ApplySchema", true /*verbose*/, err)
+}
+
+var testExecuteQueryQuery = []byte("drop table t")
+
+func (fra *fakeRPCTM) ExecuteQuery(ctx context.Context, query []byte, dbName string, maxrows int) (*querypb.QueryResult, error) {
+	if fra.panics {
+		panic(fmt.Errorf("test-triggered panic"))
+	}
+	compare(fra.t, "ExecuteQuery query", query, testExecuteQueryQuery)
+
+	return testExecuteFetchResult, nil
 }
 
 var testExecuteFetchQuery = []byte("fetch this invalid utf8 character \x80")

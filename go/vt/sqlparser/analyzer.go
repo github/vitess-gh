@@ -109,6 +109,10 @@ func ASTToStatementType(stmt Statement) StatementType {
 		return StmtFlush
 	case *CallProc:
 		return StmtCallProc
+	case *Stream:
+		return StmtStream
+	case *VStream:
+		return StmtVStream
 	default:
 		return StmtUnknown
 	}
@@ -117,7 +121,7 @@ func ASTToStatementType(stmt Statement) StatementType {
 //CanNormalize takes Statement and returns if the statement can be normalized.
 func CanNormalize(stmt Statement) bool {
 	switch stmt.(type) {
-	case *Select, *Union, *Insert, *Update, *Delete, *Set, *CallProc: // TODO: we could merge this logic into ASTrewriter
+	case *Select, *Union, *Insert, *Update, *Delete, *Set, *CallProc, *Stream: // TODO: we could merge this logic into ASTrewriter
 		return true
 	}
 	return false
@@ -127,7 +131,7 @@ func CanNormalize(stmt Statement) bool {
 func CachePlan(stmt Statement) bool {
 	switch stmt.(type) {
 	case *Select, *Union, *ParenSelect,
-		*Insert, *Update, *Delete:
+		*Insert, *Update, *Delete, *Stream:
 		return true
 	}
 	return false
@@ -406,7 +410,7 @@ func IsSimpleTuple(node Expr) bool {
 func NewPlanValue(node Expr) (sqltypes.PlanValue, error) {
 	switch node := node.(type) {
 	case Argument:
-		return sqltypes.PlanValue{Key: string(node[1:])}, nil
+		return sqltypes.PlanValue{Key: string(node)}, nil
 	case *Literal:
 		switch node.Type {
 		case IntVal:
@@ -427,7 +431,7 @@ func NewPlanValue(node Expr) (sqltypes.PlanValue, error) {
 			return sqltypes.PlanValue{Value: sqltypes.MakeTrusted(sqltypes.VarBinary, v)}, nil
 		}
 	case ListArg:
-		return sqltypes.PlanValue{ListKey: string(node[2:])}, nil
+		return sqltypes.PlanValue{ListKey: string(node)}, nil
 	case ValTuple:
 		pv := sqltypes.PlanValue{
 			Values: make([]sqltypes.PlanValue, 0, len(node)),

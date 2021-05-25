@@ -182,6 +182,20 @@ export const fetchTablets = async () =>
         },
     });
 
+export interface FetchVSchemaParams {
+    clusterID: string;
+    keyspace: string;
+}
+
+export const fetchVSchema = async ({ clusterID, keyspace }: FetchVSchemaParams) => {
+    const { result } = await vtfetch(`/api/vschema/${clusterID}/${keyspace}`);
+
+    const err = pb.VSchema.verify(result);
+    if (err) throw Error(err);
+
+    return pb.VSchema.create(result);
+};
+
 export const fetchWorkflows = async () => {
     const { result } = await vtfetch(`/api/workflows`);
 
@@ -198,4 +212,20 @@ export const fetchWorkflow = async (params: { clusterID: string; keyspace: strin
     if (err) throw Error(err);
 
     return pb.Workflow.create(result);
+};
+
+export const fetchVTExplain = async <R extends pb.IVTExplainRequest>({ cluster, keyspace, sql }: R) => {
+    // As an easy enhancement for later, we can also validate the request parameters on the front-end
+    // instead of defaulting to '', to save a round trip.
+    const req = new URLSearchParams();
+    req.append('cluster', cluster || '');
+    req.append('keyspace', keyspace || '');
+    req.append('sql', sql || '');
+
+    const { result } = await vtfetch(`/api/vtexplain?${req}`);
+
+    const err = pb.VTExplainResponse.verify(result);
+    if (err) throw Error(err);
+
+    return pb.VTExplainResponse.create(result);
 };

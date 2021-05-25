@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"context"
 
 	"vitess.io/vitess/go/acl"
@@ -120,7 +122,7 @@ type TabletServer struct {
 	onlineDDLExecutor *onlineddl.Executor
 
 	// alias is used for identifying this tabletserver in healthcheck responses.
-	alias topodatapb.TabletAlias
+	alias *topodatapb.TabletAlias
 }
 
 var _ queryservice.QueryService = (*TabletServer)(nil)
@@ -131,7 +133,7 @@ var _ queryservice.QueryService = (*TabletServer)(nil)
 var RegisterFunctions []func(Controller)
 
 // NewServer creates a new TabletServer based on the command line flags.
-func NewServer(name string, topoServer *topo.Server, alias topodatapb.TabletAlias) *TabletServer {
+func NewServer(name string, topoServer *topo.Server, alias *topodatapb.TabletAlias) *TabletServer {
 	return NewTabletServer(name, tabletenv.NewCurrentConfig(), topoServer, alias)
 }
 
@@ -142,7 +144,7 @@ var (
 
 // NewTabletServer creates an instance of TabletServer. Only the first
 // instance of TabletServer will expose its state variables.
-func NewTabletServer(name string, config *tabletenv.TabletConfig, topoServer *topo.Server, alias topodatapb.TabletAlias) *TabletServer {
+func NewTabletServer(name string, config *tabletenv.TabletConfig, topoServer *topo.Server, alias *topodatapb.TabletAlias) *TabletServer {
 	exporter := servenv.NewExporter(name, "Tablet")
 	tsv := &TabletServer{
 		exporter:               exporter,
@@ -153,7 +155,7 @@ func NewTabletServer(name string, config *tabletenv.TabletConfig, topoServer *to
 		TerseErrors:            config.TerseErrors,
 		enableHotRowProtection: config.HotRowProtection.Mode != tabletenv.Disable,
 		topoServer:             topoServer,
-		alias:                  alias,
+		alias:                  proto.Clone(alias).(*topodatapb.TabletAlias),
 	}
 
 	tsOnce.Do(func() { srvTopoServer = srvtopo.NewResilientServer(topoServer, "TabletSrvTopo") })
@@ -226,19 +228,19 @@ func NewTabletServer(name string, config *tabletenv.TabletConfig, topoServer *to
 
 // InitDBConfig initializes the db config variables for TabletServer. You must call this function
 // to complete the creation of TabletServer.
-func (tsv *TabletServer) InitDBConfig(target querypb.Target, dbcfgs *dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) error {
+func (tsv *TabletServer) InitDBConfig(target *querypb.Target, dbcfgs *dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) error {
 	if tsv.sm.State() != StateNotConnected {
-		return vterrors.Errorf(vtrpcpb.Code_UNKNOWN, "InitDBConfig failed, current state: %s", tsv.sm.IsServingString())
+		return vterrors.NewErrorf(vtrpcpb.Code_UNAVAILABLE, vterrors.ServerNotAvailable, "Server isn't available")
 	}
 	tsv.sm.Init(tsv, target)
-	tsv.sm.target = target
+	tsv.sm.target = proto.Clone(target).(*querypb.Target)
 	tsv.config.DB = dbcfgs
 
 	tsv.se.InitDBConfig(tsv.config.DB.DbaWithDB())
 	tsv.rt.InitDBConfig(target, mysqld)
 	tsv.txThrottler.InitDBConfig(target)
 	tsv.vstreamer.InitDBConfig(target.Keyspace)
-	tsv.hs.InitDBConfig(target)
+	tsv.hs.InitDBConfig(target, tsv.config.DB.DbaWithDB())
 	tsv.onlineDDLExecutor.InitDBConfig(target.Keyspace, target.Shard, dbcfgs.DBName)
 	tsv.lagThrottler.InitDBConfig(target.Keyspace, target.Shard)
 	tsv.tableGC.InitDBConfig(target.Keyspace, target.Shard, dbcfgs.DBName)
@@ -347,7 +349,7 @@ func (tsv *TabletServer) SetServingType(tabletType topodatapb.TabletType, terTim
 
 // StartService is a convenience function for InitDBConfig->SetServingType
 // with serving=true.
-func (tsv *TabletServer) StartService(target querypb.Target, dbcfgs *dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) error {
+func (tsv *TabletServer) StartService(target *querypb.Target, dbcfgs *dbconfigs.DBConfigs, mysqld mysqlctl.MysqlDaemon) error {
 	if err := tsv.InitDBConfig(target, dbcfgs, mysqld); err != nil {
 		return err
 	}
@@ -453,6 +455,11 @@ func (tsv *TabletServer) TableGC() *gc.TableGC {
 	return tsv.tableGC
 }
 
+// TwoPCEngineWait waits until the TwoPC engine has been opened, and the redo read
+func (tsv *TabletServer) TwoPCEngineWait() {
+	tsv.te.twoPCReady.Wait()
+}
+
 // SchemaEngine returns the SchemaEngine part of TabletServer.
 func (tsv *TabletServer) SchemaEngine() *schema.Engine {
 	return tsv.se
@@ -491,7 +498,7 @@ func (tsv *TabletServer) begin(ctx context.Context, target *querypb.Target, preQ
 			return err
 		},
 	)
-	return transactionID, &tsv.alias, err
+	return transactionID, tsv.alias, err
 }
 
 // Commit commits the specified transaction.
@@ -693,7 +700,7 @@ func (tsv *TabletServer) Execute(ctx context.Context, target *querypb.Target, sq
 	defer span.Finish()
 
 	if transactionID != 0 && reservedID != 0 && transactionID != reservedID {
-		return nil, vterrors.New(vtrpcpb.Code_INTERNAL, "transactionID and reserveID must match if both are non-zero")
+		return nil, vterrors.New(vtrpcpb.Code_INTERNAL, "[BUG] transactionID and reserveID must match if both are non-zero")
 	}
 
 	allowOnShutdown := false
@@ -805,18 +812,7 @@ func (tsv *TabletServer) StreamExecute(ctx context.Context, target *querypb.Targ
 				logStats:       logStats,
 				tsv:            tsv,
 			}
-			newCallback := func(result *sqltypes.Result) error {
-				if sqltypes.IncludeFieldsOrDefault(options) == querypb.ExecuteOptions_ALL {
-					// Change database name in mysql output to the keyspace name
-					for _, f := range result.Fields {
-						if f.Database != "" {
-							f.Database = tsv.sm.target.Keyspace
-						}
-					}
-				}
-				return callback(result)
-			}
-			return qre.Stream(newCallback)
+			return qre.Stream(callback)
 		},
 	)
 }
@@ -831,10 +827,10 @@ func (tsv *TabletServer) ExecuteBatch(ctx context.Context, target *querypb.Targe
 	defer span.Finish()
 
 	if len(queries) == 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "Empty query list")
+		return nil, vterrors.NewErrorf(vtrpcpb.Code_INVALID_ARGUMENT, vterrors.EmptyQuery, "Query was empty")
 	}
 	if asTransaction && transactionID != 0 {
-		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "cannot start a new transaction in the scope of an existing one")
+		return nil, vterrors.NewErrorf(vtrpcpb.Code_FAILED_PRECONDITION, vterrors.CantDoThisInTransaction, "You are not allowed to execute this command in a transaction")
 	}
 
 	if tsv.enableHotRowProtection && asTransaction {
@@ -1091,7 +1087,7 @@ func (tsv *TabletServer) execDML(ctx context.Context, target *querypb.Target, qu
 
 	query, bv, err := queryGenerator()
 	if err != nil {
-		return 0, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "%v", err)
+		return 0, err
 	}
 
 	transactionID, _, err := tsv.Begin(ctx, target, nil)
@@ -1176,7 +1172,7 @@ func (tsv *TabletServer) ReserveBeginExecute(ctx context.Context, target *queryp
 	}
 
 	result, err := tsv.Execute(ctx, target, sql, bindVariables, connID, connID, options)
-	return result, connID, connID, &tsv.alias, err
+	return result, connID, connID, tsv.alias, err
 }
 
 //ReserveExecute implements the QueryService interface
@@ -1205,13 +1201,13 @@ func (tsv *TabletServer) ReserveExecute(ctx context.Context, target *querypb.Tar
 	}
 
 	result, err := tsv.Execute(ctx, target, sql, bindVariables, connID, connID, options)
-	return result, connID, &tsv.alias, err
+	return result, connID, tsv.alias, err
 }
 
 //Release implements the QueryService interface
 func (tsv *TabletServer) Release(ctx context.Context, target *querypb.Target, transactionID, reservedID int64) error {
 	if reservedID == 0 && transactionID == 0 {
-		return vterrors.New(vtrpcpb.Code_INVALID_ARGUMENT, "Connection Id and Transaction ID does not exists")
+		return vterrors.NewErrorf(vtrpcpb.Code_INVALID_ARGUMENT, vterrors.NoSuchSession, "connection ID and transaction ID do not exist")
 	}
 	return tsv.execRequest(
 		ctx, tsv.QueryTimeout.Get(),
@@ -1423,7 +1419,7 @@ func convertErrorCode(err error) vtrpcpb.Code {
 		errCode = vtrpcpb.Code_RESOURCE_EXHAUSTED
 	case mysql.ERLockWaitTimeout:
 		errCode = vtrpcpb.Code_DEADLINE_EXCEEDED
-	case mysql.CRServerGone, mysql.ERServerShutdown:
+	case mysql.CRServerGone, mysql.ERServerShutdown, mysql.ERServerIsntAvailable:
 		errCode = vtrpcpb.Code_UNAVAILABLE
 	case mysql.ERFormNotFound, mysql.ERKeyNotFound, mysql.ERBadFieldError, mysql.ERNoSuchThread, mysql.ERUnknownTable, mysql.ERCantFindUDF, mysql.ERNonExistingGrant,
 		mysql.ERNoSuchTable, mysql.ERNonExistingTableGrant, mysql.ERKeyDoesNotExist:
@@ -1733,6 +1729,11 @@ func (tsv *TabletServer) SetStreamPoolSize(val int) {
 	tsv.qe.streamConns.SetCapacity(val)
 }
 
+// SetStreamConsolidationBlocking sets whether the stream consolidator should wait for slow clients
+func (tsv *TabletServer) SetStreamConsolidationBlocking(block bool) {
+	tsv.qe.streamConsolidator.SetBlocking(block)
+}
+
 // StreamPoolSize returns the pool size.
 func (tsv *TabletServer) StreamPoolSize() int {
 	return int(tsv.qe.streamConns.Capacity())
@@ -1797,6 +1798,16 @@ func (tsv *TabletServer) SetWarnResultSize(val int) {
 // WarnResultSize returns the warn result size.
 func (tsv *TabletServer) WarnResultSize() int {
 	return int(tsv.qe.warnResultSize.Get())
+}
+
+// SetThrottleMetricThreshold changes the throttler metric threshold
+func (tsv *TabletServer) SetThrottleMetricThreshold(val float64) {
+	tsv.lagThrottler.MetricsThreshold.Set(val)
+}
+
+// ThrottleMetricThreshold returns the throttler metric threshold
+func (tsv *TabletServer) ThrottleMetricThreshold() float64 {
+	return tsv.lagThrottler.MetricsThreshold.Get()
 }
 
 // SetPassthroughDMLs changes the setting to pass through all DMLs

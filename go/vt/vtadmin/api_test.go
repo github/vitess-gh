@@ -557,6 +557,10 @@ func TestFindSchema(t *testing.T) {
 										Name:     "-80",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  100,
+											},
 										},
 									},
 									"80-": {
@@ -564,6 +568,10 @@ func TestFindSchema(t *testing.T) {
 										Name:     "80-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  200,
+											},
 										},
 									},
 								},
@@ -577,6 +585,10 @@ func TestFindSchema(t *testing.T) {
 										Name:     "-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  300,
+											},
 										},
 									},
 								},
@@ -668,6 +680,10 @@ func TestFindSchema(t *testing.T) {
 										Name:     "-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c2z1",
+												Uid:  100,
+											},
 										},
 									},
 								},
@@ -900,6 +916,140 @@ func TestGetGates(t *testing.T) {
 	resp, err = api.GetGates(ctx, &vtadminpb.GetGatesRequest{})
 	assert.Error(t, err)
 	assert.Nil(t, resp)
+}
+
+func TestGetKeyspace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		clusterShards [][]*vtctldatapb.Shard
+		req           *vtadminpb.GetKeyspaceRequest
+		expected      *vtadminpb.Keyspace
+		shouldErr     bool
+	}{
+		{
+			clusterShards: [][]*vtctldatapb.Shard{
+				// cluster-0
+				{
+					{
+						Keyspace: "ks",
+						Name:     "-80",
+						Shard:    &topodatapb.Shard{},
+					},
+					{
+						Keyspace: "ks",
+						Name:     "80-",
+						Shard:    &topodatapb.Shard{},
+					},
+				},
+				// cluster-1
+				{
+					{
+						Keyspace: "ks",
+						Name:     "-",
+						Shard:    &topodatapb.Shard{},
+					},
+				},
+			},
+			req: &vtadminpb.GetKeyspaceRequest{
+				ClusterId: "cluster-1",
+				Keyspace:  "ks",
+			},
+			expected: &vtadminpb.Keyspace{
+				Cluster: &vtadminpb.Cluster{
+					Id:   "cluster-1",
+					Name: "cluster-1",
+				},
+				Keyspace: &vtctldatapb.Keyspace{
+					Name:     "ks",
+					Keyspace: &topodatapb.Keyspace{},
+				},
+				Shards: map[string]*vtctldatapb.Shard{
+					"-": {
+						Keyspace: "ks",
+						Name:     "-",
+						Shard:    &topodatapb.Shard{},
+					},
+				},
+			},
+		},
+		{
+			name: "nonexistent cluster",
+			clusterShards: [][]*vtctldatapb.Shard{
+				// cluster-0
+				{
+					{
+						Keyspace: "ks",
+						Name:     "-80",
+						Shard:    &topodatapb.Shard{},
+					},
+					{
+						Keyspace: "ks",
+						Name:     "80-",
+						Shard:    &topodatapb.Shard{},
+					},
+				},
+				// cluster-1
+				{
+					{
+						Keyspace: "ks",
+						Name:     "-",
+						Shard:    &topodatapb.Shard{},
+					},
+				},
+			},
+			req: &vtadminpb.GetKeyspaceRequest{
+				ClusterId: "cluster-2",
+			},
+			shouldErr: true,
+		},
+	}
+
+	ctx := context.Background()
+
+	for _, tt := range tests {
+		tt := tt
+
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			topos := make([]*topo.Server, len(tt.clusterShards))
+			vtctlds := make([]vtctlservicepb.VtctldServer, len(tt.clusterShards))
+
+			for i, shards := range tt.clusterShards {
+				ts := memorytopo.NewServer("cell1")
+				testutil.AddShards(ctx, t, ts, shards...)
+				topos[i] = ts
+				vtctlds[i] = testutil.NewVtctldServerWithTabletManagerClient(t, ts, nil, func(ts *topo.Server) vtctlservicepb.VtctldServer {
+					return grpcvtctldserver.NewVtctldServer(ts)
+				})
+			}
+
+			testutil.WithTestServers(t, func(t *testing.T, clients ...vtctldclient.VtctldClient) {
+				clusters := make([]*cluster.Cluster, len(clients))
+				for i, client := range clients {
+					clusters[i] = vtadmintestutil.BuildCluster(vtadmintestutil.TestClusterConfig{
+						Cluster: &vtadminpb.Cluster{
+							Id:   fmt.Sprintf("cluster-%d", i),
+							Name: fmt.Sprintf("cluster-%d", i),
+						},
+						VtctldClient: client,
+					})
+				}
+
+				api := NewAPI(clusters, grpcserver.Options{}, http.Options{})
+				ks, err := api.GetKeyspace(ctx, tt.req)
+				if tt.shouldErr {
+					assert.Error(t, err)
+					return
+				}
+
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, ks)
+			}, vtctlds...)
+		})
+	}
 }
 
 func TestGetKeyspaces(t *testing.T) {
@@ -1403,6 +1553,10 @@ func TestGetSchema(t *testing.T) {
 										Name:     "-80",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  100,
+											},
 										},
 									},
 									"80-": {
@@ -1410,6 +1564,10 @@ func TestGetSchema(t *testing.T) {
 										Name:     "80-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  200,
+											},
 										},
 									},
 								},
@@ -1895,7 +2053,7 @@ func TestGetSchemas(t *testing.T) {
 				ClusterIds: []string{"nope"},
 			},
 			expected: &vtadminpb.GetSchemasResponse{
-				Schemas: []*vtadminpb.Schema{},
+				Schemas: nil,
 			},
 		},
 		{
@@ -1918,7 +2076,7 @@ func TestGetSchemas(t *testing.T) {
 			tabletSchemas: map[string]*tabletmanagerdatapb.SchemaDefinition{},
 			req:           &vtadminpb.GetSchemasRequest{},
 			expected: &vtadminpb.GetSchemasResponse{
-				Schemas: []*vtadminpb.Schema{},
+				Schemas: nil,
 			},
 		},
 		{
@@ -1961,7 +2119,7 @@ func TestGetSchemas(t *testing.T) {
 			},
 			req: &vtadminpb.GetSchemasRequest{},
 			expected: &vtadminpb.GetSchemasResponse{
-				Schemas: []*vtadminpb.Schema{},
+				Schemas: nil,
 			},
 		},
 	}
@@ -2040,7 +2198,7 @@ func TestGetSchemas(t *testing.T) {
 				resp, err := api.GetSchemas(ctx, tt.req)
 				require.NoError(t, err)
 
-				vtadmintestutil.AssertSchemaSlicesEqual(t, tt.expected.Schemas, resp.Schemas, tt.name)
+				vtadmintestutil.AssertSchemaSlicesEqual(t, tt.expected.Schemas, resp.Schemas)
 			}, vtctlds...)
 		})
 	}
@@ -2073,6 +2231,10 @@ func TestGetSchemas(t *testing.T) {
 										Name:     "-80",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  100,
+											},
 										},
 									},
 									"80-": {
@@ -2080,6 +2242,10 @@ func TestGetSchemas(t *testing.T) {
 										Name:     "80-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone1",
+												Uid:  200,
+											},
 										},
 									},
 								},
@@ -2093,6 +2259,10 @@ func TestGetSchemas(t *testing.T) {
 										Name:     "-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c1zone2",
+												Uid:  100,
+											},
 										},
 									},
 								},
@@ -2184,6 +2354,10 @@ func TestGetSchemas(t *testing.T) {
 										Name:     "-",
 										Shard: &topodatapb.Shard{
 											IsMasterServing: true,
+											MasterAlias: &topodatapb.TabletAlias{
+												Cell: "c2z1",
+												Uid:  100,
+											},
 										},
 									},
 								},
@@ -2357,7 +2531,7 @@ func TestGetTablet(t *testing.T) {
 			},
 			dbconfigs: map[string]vtadmintestutil.Dbcfg{},
 			req: &vtadminpb.GetTabletRequest{
-				Hostname: "ks1-00-00-zone1-a",
+				Alias: "zone1-100",
 			},
 			expected: &vtadminpb.Tablet{
 				Cluster: &vtadminpb.Cluster{
@@ -2418,7 +2592,7 @@ func TestGetTablet(t *testing.T) {
 				"c1": {ShouldErr: true},
 			},
 			req: &vtadminpb.GetTabletRequest{
-				Hostname: "doesn't matter",
+				Alias: "doesn't matter",
 			},
 			expected:  nil,
 			shouldErr: true,
@@ -2461,7 +2635,7 @@ func TestGetTablet(t *testing.T) {
 			},
 			dbconfigs: map[string]vtadmintestutil.Dbcfg{},
 			req: &vtadminpb.GetTabletRequest{
-				Hostname:   "ks1-00-00-zone1-a",
+				Alias:      "zone1-100",
 				ClusterIds: []string{"c0"},
 			},
 			expected: &vtadminpb.Tablet{
@@ -2508,7 +2682,7 @@ func TestGetTablet(t *testing.T) {
 						State: vtadminpb.Tablet_SERVING,
 						Tablet: &topodatapb.Tablet{
 							Alias: &topodatapb.TabletAlias{
-								Uid:  200,
+								Uid:  100,
 								Cell: "zone1",
 							},
 							Hostname: "ks1-00-00-zone1-a",
@@ -2521,7 +2695,7 @@ func TestGetTablet(t *testing.T) {
 			},
 			dbconfigs: map[string]vtadmintestutil.Dbcfg{},
 			req: &vtadminpb.GetTabletRequest{
-				Hostname: "ks1-00-00-zone1-a",
+				Alias: "zone1-100",
 			},
 			expected:  nil,
 			shouldErr: true,
@@ -2534,7 +2708,7 @@ func TestGetTablet(t *testing.T) {
 			},
 			dbconfigs: map[string]vtadmintestutil.Dbcfg{},
 			req: &vtadminpb.GetTabletRequest{
-				Hostname: "ks1-00-00-zone1-a",
+				Alias: "zone1-100",
 			},
 			expected:  nil,
 			shouldErr: true,

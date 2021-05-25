@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	gofuzzheaders "github.com/AdaLogics/go-fuzz-headers"
+
 	"vitess.io/vitess/go/sqltypes"
 	querypb "vitess.io/vitess/go/vt/proto/query"
 	"vitess.io/vitess/go/vt/tlstest"
@@ -93,7 +95,7 @@ func (t fuzztestRun) ComQuery(c *Conn, query string, callback func(*sqltypes.Res
 }
 
 func (t fuzztestRun) ComPrepare(c *Conn, query string, bindVars map[string]*querypb.BindVariable) ([]*querypb.Field, error) {
-	panic("implement me")
+	return nil, nil
 }
 
 func (t fuzztestRun) ComStmtExecute(c *Conn, prepare *PrepareData, callback func(*sqltypes.Result) error) error {
@@ -117,8 +119,8 @@ type fuzztestConn struct {
 }
 
 func (t fuzztestConn) Read(b []byte) (n int, err error) {
-	for j, i := range t.queryPacket {
-		b[j] = i
+	for i := 0; i < len(b) && i < len(t.queryPacket); i++ {
+		b[i] = t.queryPacket[i]
 	}
 	return len(b), nil
 }
@@ -203,6 +205,7 @@ func FuzzHandleNextCommand(data []byte) int {
 		pos:         -1,
 		queryPacket: data,
 	})
+	sConn.PrepareData = map[uint32]*PrepareData{}
 
 	handler := &fuzztestRun{}
 	_ = sConn.handleNextCommand(handler)
@@ -299,7 +302,33 @@ func (th *fuzzTestHandler) WarningCount(c *Conn) uint16 {
 	return th.warnings
 }
 
+func (c *Conn) writeFuzzedPacket(packet []byte) {
+	c.sequence = 0
+	data, pos := c.startEphemeralPacketWithHeader(len(packet) + 1)
+	copy(data[pos:], packet)
+	_ = c.writeEphemeralPacket()
+}
+
 func FuzzTLSServer(data []byte) int {
+	if len(data) < 40 {
+		return -1
+	}
+	// totalQueries is the number of queries the fuzzer
+	// makes in each fuzz iteration
+	totalQueries := 20
+	var queries [][]byte
+	c := gofuzzheaders.NewConsumer(data)
+	for i := 0; i < totalQueries; i++ {
+		query, err := c.GetBytes()
+		if err != nil {
+			return -1
+		}
+		if len(query) < 40 {
+			continue
+		}
+		queries = append(queries, query)
+	}
+
 	th := &fuzzTestHandler{}
 
 	authServer := NewAuthServerStatic("", "", 0)
@@ -354,9 +383,9 @@ func FuzzTLSServer(data []byte) int {
 	if err != nil {
 		return -1
 	}
-	_, err = conn.ExecuteFetch(string(data), 1000, true)
-	if err != nil {
-		return 0
+
+	for i := 0; i < len(queries); i++ {
+		conn.writeFuzzedPacket(queries[i])
 	}
 	return 1
 }
