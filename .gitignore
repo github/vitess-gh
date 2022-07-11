@@ -3,6 +3,7 @@
 
 # For mac users
 .DS_Store
+./DS_Store
 
 # Produced by yacc
 *.output
