@@ -21,7 +21,6 @@ import (
 	"path"
 	"strings"
 
-	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"vitess.io/vitess/go/vt/vterrors"
@@ -74,7 +73,7 @@ func (ts *Server) GetCellInfo(ctx context.Context, cell string, strongRead bool)
 
 	// Unpack the contents.
 	ci := &topodatapb.CellInfo{}
-	if err := proto.Unmarshal(contents, ci); err != nil {
+	if err := ci.UnmarshalVT(contents); err != nil {
 		return nil, err
 	}
 	return ci, nil
@@ -83,7 +82,7 @@ func (ts *Server) GetCellInfo(ctx context.Context, cell string, strongRead bool)
 // CreateCellInfo creates a new CellInfo with the provided content.
 func (ts *Server) CreateCellInfo(ctx context.Context, cell string, ci *topodatapb.CellInfo) error {
 	// Pack the content.
-	contents, err := proto.Marshal(ci)
+	contents, err := ci.MarshalVT()
 	if err != nil {
 		return err
 	}
@@ -108,7 +107,7 @@ func (ts *Server) UpdateCellInfoFields(ctx context.Context, cell string, update 
 		contents, version, err := ts.globalCell.Get(ctx, filePath)
 		switch {
 		case err == nil:
-			if err := proto.Unmarshal(contents, ci); err != nil {
+			if err := ci.UnmarshalVT(contents); err != nil {
 				return err
 			}
 		case IsErrType(err, NoNode):
@@ -126,7 +125,7 @@ func (ts *Server) UpdateCellInfoFields(ctx context.Context, cell string, update 
 		}
 
 		// Pack and save.
-		contents, err = proto.Marshal(ci)
+		contents, err = ci.MarshalVT()
 		if err != nil {
 			return err
 		}
