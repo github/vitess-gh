@@ -8,67 +8,55 @@ import (
 	lstracer "github.com/lightstep/lightstep-tracer-go"
 	"github.com/opentracing/opentracing-go"
 	"github.com/spf13/pflag"
-
-	"vitess.io/vitess/go/viperutil"
 )
 
 var (
-	lightstepConfigKey = viperutil.KeyPrefixFunc(configKey("lightstep"))
-
-	lightstepCollectorHost = viperutil.Configure(
-		lightstepConfigKey("collector.host"),
-		viperutil.Options[string]{
-			FlagName: "lightstep-collector-host",
-		},
-	)
-	lightstepCollectorPort = viperutil.Configure(
-		lightstepConfigKey("collector.port"),
-		viperutil.Options[int]{
-			FlagName: "lightstep-collector-port",
-		},
-	)
-	lightstepAccessToken = viperutil.Configure(
-		lightstepConfigKey("access-token"),
-		viperutil.Options[string]{
-			FlagName: "lightstep-access-token",
-		},
-	)
+	lightstepCollectorHost string
+	lightstepCollectorPort int
+	lightstepAccessToken   string
 )
 
 func init() {
 	// If compiled with plugin_lightstep, ensure that trace.RegisterFlags
 	// includes lightstep tracing flags.
 	pluginFlags = append(pluginFlags, func(fs *pflag.FlagSet) {
-		fs.String("lightstep-collector-host", "", "host to send spans to. if empty, no tracing will be done")
-		fs.String("lightstep-collector-port", "", "port to send spans to. if empty, no tracing will be done")
-		fs.String("lightstep-access-token", "", "unique API key for your LightStep project. if empty, no tracing will be done")
-
-		viperutil.BindFlags(fs, lightstepCollectorHost, lightstepCollectorPort, lightstepAccessToken)
+		fs.StringVar(&lightstepCollectorHost, "lightstep-collector-host", "", "lightstep collector host. if empty, no tracing will be done")
+		fs.IntVar(&lightstepCollectorPort, "lightstep-collector-port", 0, "lightstep collector port. if empty, no tracing will be done")
+		fs.StringVar(&lightstepAccessToken, "lightstep-access-token", "", "unique API key for your LightStep project. if empty, no tracing will be done")
 	})
 }
 
 func newLightstepTracer(serviceName string) (tracingService, io.Closer, error) {
-	accessToken := lightstepAccessToken.Get()
-	if accessToken == "" {
+	if lightstepAccessToken == "" {
 		return nil, nil, fmt.Errorf("need access token to use lightstep tracing")
 	}
 
-	collectorHost, collectorPort := lightstepCollectorHost.Get(), lightstepCollectorPort.Get()
-	if collectorHost == "" || collectorPort == 0 {
+	if lightstepCollectorHost == "" || lightstepCollectorPort == 0 {
 		return nil, nil, fmt.Errorf("need collector host and port to use lightstep tracing")
 	}
 
-	t := lstracer.NewTracer(lstracer.Options{
-		AccessToken: accessToken,
+	opts := lstracer.Options{
+		AccessToken: lightstepAccessToken,
 		Collector: lstracer.Endpoint{
-			Host: collectorHost,
-			Port: collectorPort,
+			Host: lightstepCollectorHost,
+			Port: lightstepCollectorPort,
 		},
-		// TODO: sampling rate?
-	})
+	}
 
-	// TODO: logging?
+	if enableLogging {
+		logHandler := func(event lstracer.Event) {
+			switch event := event.(type) {
+			case lstracer.ErrorEvent:
+				(&traceLogger{}).Error(fmt.Sprintf("lightstep tracer error: %s", event.Err()))
+			default:
+				(&traceLogger{}).Infof("lightstep tracer: %s", event.String())
+			}
+		}
 
+		lstracer.SetGlobalEventHandler(logHandler)
+	}
+
+	t := lstracer.NewTracer(opts)
 	opentracing.SetGlobalTracer(t)
 
 	return openTracingService{Tracer: &lightstepTracer{actual: t}}, &lightstepCloser{}, nil
@@ -79,7 +67,7 @@ var _ io.Closer = (*lightstepCloser)(nil)
 type lightstepCloser struct{}
 
 func (lightstepCloser) Close() error {
-	lstracer.Flush(context.Background(), opentracing.GlobalTracer())
+	lstracer.Close(context.Background(), opentracing.GlobalTracer())
 	return nil
 }
 
