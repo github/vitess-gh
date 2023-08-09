@@ -183,6 +183,11 @@ func startSpan(ctx context.Context, query, label string) (trace.Span, context.Co
 
 func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sqltypes.Result) error) error {
 	ctx := context.Background()
+
+	if terminating {
+		return vterrors.New(vtrpcpb.Code_ABORTED, "Terminating vtgate")
+	}
+
 	var cancel context.CancelFunc
 	if *mysqlQueryTimeout != 0 {
 		ctx, cancel = context.WithTimeout(ctx, *mysqlQueryTimeout)
