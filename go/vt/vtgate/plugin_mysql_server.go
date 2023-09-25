@@ -196,6 +196,12 @@ func startSpan(ctx context.Context, query, label string) (trace.Span, context.Co
 }
 
 func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sqltypes.Result) error) error {
+	session := vh.session(c)
+	if c.IsShuttingDown() && !session.InTransaction {
+		c.MarkForClose()
+		return mysql.NewSQLError(mysql.ERServerShutdown, mysql.SSNetError, "Server shutdown in progress")
+	}
+
 	ctx := context.Background()
 	var cancel context.CancelFunc
 	if mysqlQueryTimeout != 0 {
@@ -223,7 +229,6 @@ func (vh *vtgateHandler) ComQuery(c *mysql.Conn, query string, callback func(*sq
 		"VTGate MySQL Connector" /* subcomponent: part of the client */)
 	ctx = callerid.NewContext(ctx, ef, im)
 
-	session := vh.session(c)
 	if !session.InTransaction {
 		atomic.AddInt32(&busyConnections, 1)
 	}
@@ -565,11 +570,11 @@ func newMysqlUnixSocket(address string, authServer mysql.AuthServer, handler mys
 
 func shutdownMysqlProtocolAndDrain() {
 	if mysqlListener != nil {
-		mysqlListener.Close()
+		mysqlListener.Shutdown()
 		mysqlListener = nil
 	}
 	if mysqlUnixListener != nil {
-		mysqlUnixListener.Close()
+		mysqlUnixListener.Shutdown()
 		mysqlUnixListener = nil
 	}
 	if sigChan != nil {
