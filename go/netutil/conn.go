@@ -36,17 +36,17 @@ func NewConnWithTimeouts(conn net.Conn, readTimeout time.Duration, writeTimeout 
 // Implementation of the Conn interface.
 
 // Read sets a read deadilne and delegates to conn.Read.
-func (c ConnWithTimeouts) Read(b []byte) (int, error) {
+func (c *ConnWithTimeouts) Read(b []byte) (int, error) {
+	defer func () {
+		c.nextReadTimeout = c.readTimeout;
+	}()
 	if c.nextReadTimeout == 0 {
 		return c.Conn.Read(b)
 	}
 	if err := c.Conn.SetReadDeadline(time.Now().Add(c.nextReadTimeout)); err != nil {
 		return 0, err
 	}
-	n, err := c.Conn.Read(b)
-	// how do I reset the read timeout here without a pointer receiver?
-	c.nextReadTimeout = c.readTimeout
-	return n, err
+	return c.Conn.Read(b)
 }
 
 // Write sets a write deadline and delegates to conn.Write

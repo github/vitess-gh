@@ -522,7 +522,7 @@ func (l *Listener) handle(conn net.Conn, connectionID uint32, acceptTime time.Ti
 
 	for {
 		waitTimeout := 10 * time.Second
-		(&connWithTimeouts).SetNextReadTimeout(waitTimeout)
+		connWithTimeouts.SetNextReadTimeout(waitTimeout)
 		kontinue := c.handleNextCommand(l.handler)
 		if !kontinue {
 			return
