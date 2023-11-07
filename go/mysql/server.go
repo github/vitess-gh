@@ -331,8 +331,10 @@ func (l *Listener) Accept() {
 // handle is called in a go routine for each client connection.
 // FIXME(alainjobart) handle per-connection logs in a way that makes sense.
 func (l *Listener) handle(conn net.Conn, connectionID uint32, acceptTime time.Time) {
+	var connWithTimeouts netutil.ConnWithTimeouts
 	if l.connReadTimeout != 0 || l.connWriteTimeout != 0 {
-		conn = netutil.NewConnWithTimeouts(conn, l.connReadTimeout, l.connWriteTimeout)
+		connWithTimeouts = netutil.NewConnWithTimeouts(conn, l.connReadTimeout, l.connWriteTimeout)
+		conn = connWithTimeouts
 	}
 	c := newServerConn(conn, l)
 	c.ConnectionID = connectionID
@@ -519,6 +521,8 @@ func (l *Listener) handle(conn net.Conn, connectionID uint32, acceptTime time.Ti
 	l.handler.ConnectionReady(c)
 
 	for {
+		waitTimeout := 10 * time.Second
+		(&connWithTimeouts).SetNextReadTimeout(waitTimeout)
 		kontinue := c.handleNextCommand(l.handler)
 		if !kontinue {
 			return

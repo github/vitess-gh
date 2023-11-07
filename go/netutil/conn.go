@@ -23,6 +23,7 @@ var _ net.Conn = (*ConnWithTimeouts)(nil)
 // A ConnWithTimeouts is a wrapper to net.Comm that allows to set a read and write timeouts.
 type ConnWithTimeouts struct {
 	net.Conn
+	nextReadTimeout  time.Duration
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 }
@@ -36,13 +37,16 @@ func NewConnWithTimeouts(conn net.Conn, readTimeout time.Duration, writeTimeout 
 
 // Read sets a read deadilne and delegates to conn.Read.
 func (c ConnWithTimeouts) Read(b []byte) (int, error) {
-	if c.readTimeout == 0 {
+	if c.nextReadTimeout == 0 {
 		return c.Conn.Read(b)
 	}
-	if err := c.Conn.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
+	if err := c.Conn.SetReadDeadline(time.Now().Add(c.nextReadTimeout)); err != nil {
 		return 0, err
 	}
-	return c.Conn.Read(b)
+	n, err := c.Conn.Read(b)
+	// how do I reset the read timeout here without a pointer receiver?
+	c.nextReadTimeout = c.readTimeout
+	return n, err
 }
 
 // Write sets a write deadline and delegates to conn.Write
@@ -54,6 +58,10 @@ func (c ConnWithTimeouts) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return c.Conn.Write(b)
+}
+
+func (c *ConnWithTimeouts) SetNextReadTimeout(timeout time.Duration) {
+	c.nextReadTimeout = timeout
 }
 
 // SetDeadline implements the Conn SetDeadline method.
