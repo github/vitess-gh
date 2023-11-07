@@ -334,7 +334,7 @@ func (l *Listener) handle(conn net.Conn, connectionID uint32, acceptTime time.Ti
 	var connWithTimeouts netutil.ConnWithTimeouts
 	if l.connReadTimeout != 0 || l.connWriteTimeout != 0 {
 		connWithTimeouts = netutil.NewConnWithTimeouts(conn, l.connReadTimeout, l.connWriteTimeout)
-		conn = connWithTimeouts
+		conn = &connWithTimeouts
 	}
 	c := newServerConn(conn, l)
 	c.ConnectionID = connectionID
