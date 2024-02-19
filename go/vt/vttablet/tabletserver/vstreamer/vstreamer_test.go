@@ -125,6 +125,12 @@ func TestNoBlob(t *testing.T) {
 	env = nil
 	newEngine(t, ctx, "noblob")
 	defer func() {
+		if engine != nil {
+			engine.Close()
+		}
+		if env != nil {
+			env.Close()
+		}
 		engine = oldEngine
 		env = oldEnv
 	}()
@@ -1890,6 +1896,12 @@ func TestMinimalMode(t *testing.T) {
 	env = nil
 	newEngine(t, ctx, "minimal")
 	defer func() {
+		if engine != nil {
+			engine.Close()
+		}
+		if env != nil {
+			env.Close()
+		}
 		engine = oldEngine
 		env = oldEnv
 	}()
