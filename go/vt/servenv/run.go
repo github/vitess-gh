@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/felixge/fgprof"
 	"vitess.io/vitess/go/event"
 	"vitess.io/vitess/go/vt/log"
 )
@@ -49,6 +50,8 @@ func Run(port int) {
 	if err != nil {
 		log.Exit(err)
 	}
+
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
 	go http.Serve(l, nil)
 
 	ExitChan = make(chan os.Signal, 1)
