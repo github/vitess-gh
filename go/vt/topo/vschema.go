@@ -19,8 +19,6 @@ package topo
 import (
 	"path"
 
-	"google.golang.org/protobuf/proto"
-
 	"context"
 
 	"vitess.io/vitess/go/vt/log"
@@ -68,7 +66,7 @@ func (ts *Server) GetVSchema(ctx context.Context, keyspace string) (*vschemapb.K
 		return nil, err
 	}
 	var vs vschemapb.Keyspace
-	err = proto.Unmarshal(data, &vs)
+	err = vs.UnmarshalVT(data)
 	if err != nil {
 		return nil, vterrors.Wrapf(err, "bad vschema data: %q", data)
 	}
