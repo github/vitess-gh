@@ -59,7 +59,7 @@ jobs:
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.unit_tests == 'true'
       uses: actions/setup-go@v3
       with:
-        go-version: 1.20.11
+        go-version: 1.20.13
 
     - name: Set up python
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.unit_tests == 'true'
@@ -90,10 +90,10 @@ jobs:
 
         {{if (eq .Platform "mysql57")}}
         # Get key to latest MySQL repo
-        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 467B942D3A79BD29
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A8D3785C
 
         # mysql57
-        wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.24-1_all.deb
+        wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.29-1_all.deb
         # Bionic packages are still compatible for Jammy since there's no MySQL 5.7
         # packages for Jammy.
         echo mysql-apt-config mysql-apt-config/repo-codename select bionic | sudo debconf-set-selections
@@ -106,10 +106,10 @@ jobs:
 
         {{if (eq .Platform "mysql80")}}
         # Get key to latest MySQL repo
-        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 467B942D3A79BD29
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A8D3785C
 
         # mysql80
-        wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.24-1_all.deb
+        wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.29-1_all.deb
         echo mysql-apt-config mysql-apt-config/select-server select mysql-8.0 | sudo debconf-set-selections
         sudo DEBIAN_FRONTEND="noninteractive" dpkg -i mysql-apt-config*
         sudo apt-get update
