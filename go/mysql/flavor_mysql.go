@@ -299,8 +299,10 @@ func (mysqlFlavor) readBinlogEvent(c *Conn) (BinlogEvent, error) {
 
 // baseShowTables is part of the Flavor interface.
 func (mysqlFlavor) baseShowTables() string {
-	return "SELECT table_name, table_type, unix_timestamp(create_time), table_comment FROM information_schema.tables WHERE table_schema = database()"
+	return BaseShowTables
 }
+
+const BaseShowTables = `SELECT table_name, table_type, unix_timestamp(create_time), table_comment FROM information_schema.tables WHERE table_schema = database()`
 
 // TablesWithSize56 is a query to select table along with size for mysql 5.6
 const TablesWithSize56 = `SELECT table_name,
@@ -340,8 +342,6 @@ LEFT OUTER JOIN (
 WHERE t.table_schema = database()
 GROUP BY t.table_name, t.table_type, t.create_time, t.table_comment`
 
-// TablesWithSize80 is a query to select table along with size for mysql 8.0
-//
 // Note the following:
 //   - We use a single query to fetch both partitioned and non-partitioned tables. This is because
 //     accessing `information_schema.innodb_tablespaces` is expensive on servers with many tablespaces,

@@ -438,6 +438,11 @@ func newTabletEnvironment(ddls []sqlparser.DDLStatement, opts *Options) (*tablet
 		Rows:   showTableRows,
 	})
 
+	tEnv.addResult(mysql.BaseShowTables, &sqltypes.Result{
+		Fields: mysql.BaseShowTablesFields[0:4],
+		Rows:   showTableRows,
+	})
+
 	indexRows := make([][]sqltypes.Value, 0, 4)
 	for _, ddl := range ddls {
 		table := sqlparser.String(ddl.GetTable().Name)

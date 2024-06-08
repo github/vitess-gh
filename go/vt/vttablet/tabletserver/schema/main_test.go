@@ -35,6 +35,7 @@ func getTestSchemaEngine(t *testing.T, schemaMaxAgeSeconds int64) (*Engine, *fak
 		"1427325876",
 	))
 	db.AddQueryPattern(baseShowTablesPattern, &sqltypes.Result{})
+	db.AddQuery("SELECT table_name, table_type, unix_timestamp(create_time), table_comment FROM information_schema.tables WHERE table_schema = database()", &sqltypes.Result{})
 	db.AddQuery(mysql.BaseShowPrimary, &sqltypes.Result{})
 	AddFakeInnoDBReadRowsResult(db, 1)
 	se := newEngine(10, 10*time.Second, 10*time.Second, schemaMaxAgeSeconds, db)
