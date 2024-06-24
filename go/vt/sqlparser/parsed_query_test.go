@@ -89,7 +89,7 @@ func TestGenerateQuery(t *testing.T) {
 				"v1": sqltypes.ValueBindVariable(sqltypes.MakeTrusted(querypb.Type_JSON, []byte(`{"key": "value"}`))),
 				"v2": sqltypes.ValueBindVariable(sqltypes.MakeTrusted(querypb.Type_RAW, []byte(`json_object("k", "v")`))),
 			},
-			output: `insert into t values ('{\"key\": \"value\"}', json_object("k", "v"))`,
+			output: `insert into t values ('{"key": "value"}', json_object("k", "v"))`,
 		}, {
 			desc:  "list bind vars 0 arguments",
 			query: "select * from a where id in ::vals",
