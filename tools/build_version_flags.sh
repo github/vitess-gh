@@ -24,12 +24,24 @@ source $DIR/shell_functions.inc
 DEFAULT_BUILD_GIT_REV=$(git rev-parse HEAD)
 DEFAULT_BUILD_GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-echo "\
-  -X 'vitess.io/vitess/go/vt/servenv.buildHost=$(hostname)' \
-  -X 'vitess.io/vitess/go/vt/servenv.buildUser=$(whoami)' \
-  -X 'vitess.io/vitess/go/vt/servenv.buildGitRev=${BUILD_GIT_REV:-$DEFAULT_BUILD_GIT_REV}' \
-  -X 'vitess.io/vitess/go/vt/servenv.buildGitBranch=${BUILD_GIT_BRANCH:-$DEFAULT_BUILD_GIT_BRANCH}' \
-  -X 'vitess.io/vitess/go/vt/servenv.buildTime=$(LC_ALL=C date)' \
-  -X 'vitess.io/vitess/go/vt/servenv.jenkinsBuildNumberStr=${BUILD_NUMBER}' \
-  -checklinkname=0
-"
+GO_MINOR_VER=$(go version | cut -d ' ' -f 3 | cut -d '.' -f 2)
+if [[ $((GO_MINOR_VER)) -ge 23 ]]; then
+  echo "\
+    -X 'vitess.io/vitess/go/vt/servenv.buildHost=$(hostname)' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildUser=$(whoami)' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildGitRev=${BUILD_GIT_REV:-$DEFAULT_BUILD_GIT_REV}' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildGitBranch=${BUILD_GIT_BRANCH:-$DEFAULT_BUILD_GIT_BRANCH}' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildTime=$(LC_ALL=C date)' \
+    -X 'vitess.io/vitess/go/vt/servenv.jenkinsBuildNumberStr=${BUILD_NUMBER}' \
+    -checklinkname=0
+  "
+else
+  echo "\
+    -X 'vitess.io/vitess/go/vt/servenv.buildHost=$(hostname)' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildUser=$(whoami)' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildGitRev=${BUILD_GIT_REV:-$DEFAULT_BUILD_GIT_REV}' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildGitBranch=${BUILD_GIT_BRANCH:-$DEFAULT_BUILD_GIT_BRANCH}' \
+    -X 'vitess.io/vitess/go/vt/servenv.buildTime=$(LC_ALL=C date)' \
+    -X 'vitess.io/vitess/go/vt/servenv.jenkinsBuildNumberStr=${BUILD_NUMBER}' \
+  "
+fi
