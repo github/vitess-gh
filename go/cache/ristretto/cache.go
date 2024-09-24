@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,9 +39,9 @@ var (
 )
 
 func defaultStringHash(key string) (uint64, uint64) {
-	const Seed1 = uint64(0x1122334455667788)
-	const Seed2 = uint64(0x8877665544332211)
-	return hack.RuntimeStrhash(key, Seed1), hack.RuntimeStrhash(key, Seed2)
+	var Seed1 = maphash.MakeSeed()
+	var Seed2 = maphash.MakeSeed()
+	return maphash.String(Seed1, key), maphash.String(Seed2, key)
 }
 
 type itemCallback func(*Item)
