@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -448,10 +449,16 @@ func (hc *HealthCheckImpl) deleteTablet(tablet *topodata.Tablet) {
 				continue
 			}
 			delete(ths, tabletAlias)
-			// delete from healthy list
+
 			healthy, ok := hc.healthy[key]
 			if ok && len(healthy) > 0 {
-				hc.recomputeHealthy(key)
+				if tabletType == topodata.TabletType_PRIMARY {
+					// If tablet type is primary, we should only have one tablet in the healthy list.
+					hc.recomputeHealthyPrimary(key)
+				} else {
+					// Simply recompute the list of healthy tablets for all other tablet types.
+					hc.recomputeHealthy(key)
+				}
 			}
 		}
 	}()
@@ -579,6 +586,25 @@ func (hc *HealthCheckImpl) recomputeHealthy(key KeyspaceShardTabletType) {
 	hc.healthy[key] = FilterStatsByReplicationLag(allArray)
 }
 
+// Recompute the healthy primary tablet for the given key.
+func (hc *HealthCheckImpl) recomputeHealthyPrimary(key KeyspaceShardTabletType) {
+	highestPrimaryTermStartTime := int64(math.MinInt64)
+	var newestPrimary *TabletHealth
+
+	for _, s := range hc.healthData[key] {
+		if s.PrimaryTermStartTime >= highestPrimaryTermStartTime {
+			highestPrimaryTermStartTime = s.PrimaryTermStartTime
+			newestPrimary = s
+		}
+	}
+
+	if newestPrimary != nil {
+		hc.healthy[key] = []*TabletHealth{newestPrimary}
+	} else {
+		hc.healthy[key] = []*TabletHealth{}
+	}
+}
+
 // Subscribe adds a listener. Used by vtgate buffer to learn about primary changes.
 func (hc *HealthCheckImpl) Subscribe() chan *TabletHealth {
 	hc.subMu.Lock()
@@ -680,6 +706,11 @@ func (hc *HealthCheckImpl) GetHealthyTabletStats(target *query.Target) []*Tablet
 	var result []*TabletHealth
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
+
+	if (target.TabletType == topodata.TabletType_PRIMARY) && len(hc.healthy[KeyFromTarget(target)]) > 1 {
+		log.Warningf("[BUG] GetHealthyTabletStats called for primary tablet type, but returning more than one primary tablet")
+	}
+
 	return append(result, hc.healthy[KeyFromTarget(target)]...)
 }
 
