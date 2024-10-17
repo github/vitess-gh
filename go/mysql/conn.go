@@ -209,6 +209,7 @@ type Conn struct {
 	// cancel keep the cancel function for the current executing query.
 	// this is used by `kill [query|connection] ID` command from other connection.
 	cancel context.CancelFunc
+
 	// this is used to mark the connection to be closed so that the command phase for the connection can be stopped and
 	// the connection gets closed.
 	closing bool
@@ -1710,4 +1711,8 @@ func (c *Conn) IsMarkedForClose() bool {
 // GetTestConn returns a conn for testing purpose only.
 func GetTestConn() *Conn {
 	return newConn(testConn{})
+}
+
+func (c *Conn) IsShuttingDown() bool {
+	return c.listener.shutdown.Load()
 }
