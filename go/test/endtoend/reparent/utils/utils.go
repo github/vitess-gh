@@ -54,7 +54,7 @@ var (
 	id bigint,
 	msg varchar(64),
 	primary key (id)
-	) Engine=InnoDB	
+	) Engine=InnoDB
 `
 	cell1                  = "zone1"
 	cell2                  = "zone2"
@@ -73,6 +73,56 @@ func SetupReparentCluster(t *testing.T, durability string) *cluster.LocalProcess
 // SetupRangeBasedCluster sets up the range based cluster
 func SetupRangeBasedCluster(ctx context.Context, t *testing.T) *cluster.LocalProcessCluster {
 	return setupCluster(ctx, t, ShardName, []string{cell1}, []int{2}, "semi_sync")
+}
+
+// SetupShardedReparentCluster is used to setup a sharded cluster for testing
+func SetupShardedReparentCluster(t *testing.T, durability string) *cluster.LocalProcessCluster {
+	clusterInstance := cluster.NewCluster(cell1, Hostname)
+	// Start topo server
+	err := clusterInstance.StartTopo()
+	require.NoError(t, err)
+
+	clusterInstance.VtTabletExtraArgs = append(clusterInstance.VtTabletExtraArgs,
+		"--lock_tables_timeout", "5s",
+		"--track_schema_versions=true",
+		"--queryserver_enable_online_ddl=false")
+	clusterInstance.VtGateExtraArgs = append(clusterInstance.VtGateExtraArgs,
+		"--enable_buffer",
+		// Long timeout in case failover is slow.
+		"--buffer_window", "10m",
+		"--buffer_max_failover_duration", "10m",
+		"--buffer_min_time_between_failovers", "20m",
+	)
+
+	// Start keyspace
+	keyspace := &cluster.Keyspace{
+		Name:      KeyspaceName,
+		SchemaSQL: sqlSchema,
+		VSchema:   `{"sharded": true, "vindexes": {"hash_index": {"type": "hash"}}, "tables": {"vt_insert_test": {"column_vindexes": [{"column": "id", "name": "hash_index"}]}}}`,
+	}
+	err = clusterInstance.StartKeyspace(*keyspace, []string{"-40", "40-80", "80-"}, 2, false)
+	require.NoError(t, err)
+
+	if clusterInstance.VtctlMajorVersion >= 14 {
+		clusterInstance.VtctldClientProcess = *cluster.VtctldClientProcessInstance("localhost", clusterInstance.VtctldProcess.GrpcPort, clusterInstance.TmpDirectory)
+		out, err := clusterInstance.VtctldClientProcess.ExecuteCommandWithOutput("SetKeyspaceDurabilityPolicy", KeyspaceName, fmt.Sprintf("--durability-policy=%s", durability))
+		require.NoError(t, err, out)
+	}
+
+	// Start Vtgate
+	err = clusterInstance.StartVtgate()
+	require.NoError(t, err)
+	return clusterInstance
+}
+
+// GetInsertQuery returns a built insert query to insert a row.
+func GetInsertQuery(idx int) string {
+	return fmt.Sprintf(insertSQL, idx, idx)
+}
+
+// GetSelectionQuery returns a built selection query read the data.
+func GetSelectionQuery() string {
+	return `select * from vt_insert_test`
 }
 
 // TeardownCluster is used to teardown the reparent cluster. When
