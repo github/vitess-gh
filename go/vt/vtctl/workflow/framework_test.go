@@ -56,6 +56,12 @@ const (
 	tabletUIDStep           = 10
 )
 
+var defaultTabletTypes = []topodatapb.TabletType{
+	topodatapb.TabletType_PRIMARY,
+	topodatapb.TabletType_REPLICA,
+	topodatapb.TabletType_RDONLY,
+}
+
 type testKeyspace struct {
 	KeyspaceName string
 	ShardNames   []string
@@ -219,6 +225,40 @@ func (env *testEnv) addTableRoutingRules(t *testing.T, ctx context.Context, tabl
 	require.NoError(t, err)
 	err = env.ts.RebuildSrvVSchema(ctx, nil)
 	require.NoError(t, err)
+}
+
+func (env *testEnv) saveRoutingRules(t *testing.T, rules map[string][]string) {
+	err := topotools.SaveRoutingRules(context.Background(), env.ts, rules)
+	require.NoError(t, err)
+	err = env.ts.RebuildSrvVSchema(context.Background(), nil)
+	require.NoError(t, err)
+}
+
+func (env *testEnv) updateTableRoutingRules(t *testing.T, ctx context.Context,
+	tabletTypes []topodatapb.TabletType, tables []string, sourceKeyspace, targetKeyspace, toKeyspace string) {
+
+	if len(tabletTypes) == 0 {
+		tabletTypes = defaultTabletTypes
+	}
+	rr, err := env.ts.GetRoutingRules(ctx)
+	require.NoError(t, err)
+	rules := topotools.GetRoutingRulesMap(rr)
+	for _, tabletType := range tabletTypes {
+		for _, tableName := range tables {
+			toTarget := []string{toKeyspace + "." + tableName}
+			tt := strings.ToLower(tabletType.String())
+			if tabletType == topodatapb.TabletType_PRIMARY {
+				rules[tableName] = toTarget
+				rules[targetKeyspace+"."+tableName] = toTarget
+				rules[sourceKeyspace+"."+tableName] = toTarget
+			} else {
+				rules[tableName+"@"+tt] = toTarget
+				rules[targetKeyspace+"."+tableName+"@"+tt] = toTarget
+				rules[sourceKeyspace+"."+tableName+"@"+tt] = toTarget
+			}
+		}
+	}
+	env.saveRoutingRules(t, rules)
 }
 
 func (env *testEnv) deleteTablet(tablet *topodatapb.Tablet) {
