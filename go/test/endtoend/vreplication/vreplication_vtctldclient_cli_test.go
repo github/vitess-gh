@@ -26,7 +26,11 @@ import (
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"vitess.io/vitess/go/json2"
 	"vitess.io/vitess/go/test/endtoend/cluster"
+	"vitess.io/vitess/go/vt/topo/topoproto"
+	"vitess.io/vitess/go/vt/wrangler"
+
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
 	tabletmanagerdatapb "vitess.io/vitess/go/vt/proto/tabletmanagerdata"
 	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
@@ -57,7 +61,19 @@ func TestVtctldclientCLI(t *testing.T) {
 	targetKeyspaceName := "customer"
 	var mt iMoveTables
 	workflowName := "wf1"
+
+	sourceReplicaTab = vc.Cells["zone1"].Keyspaces[sourceKeyspaceName].Shards["0"].Tablets["zone1-101"].Vttablet
+	require.NotNil(t, sourceReplicaTab)
+	sourceTab = vc.Cells["zone1"].Keyspaces[sourceKeyspaceName].Shards["0"].Tablets["zone1-100"].Vttablet
+	require.NotNil(t, sourceTab)
+
 	targetTabs := setupMinimalCustomerKeyspace(t)
+	targetTab1 = targetTabs["-80"]
+	require.NotNil(t, targetTab1)
+	targetTab2 = targetTabs["80-"]
+	require.NotNil(t, targetTab2)
+	targetReplicaTab1 = vc.Cells["zone1"].Keyspaces[targetKeyspaceName].Shards["-80"].Tablets["zone1-201"].Vttablet
+	require.NotNil(t, targetReplicaTab1)
 
 	t.Run("MoveTablesCreateFlags1", func(t *testing.T) {
 		testMoveTablesFlags1(t, &mt, sourceKeyspaceName, targetKeyspaceName, workflowName, targetTabs)
@@ -79,6 +95,19 @@ func TestVtctldclientCLI(t *testing.T) {
 			"-40":   targetKeyspace.Shards["-40"].Tablets["zone1-400"].Vttablet,
 			"40-80": targetKeyspace.Shards["40-80"].Tablets["zone1-500"].Vttablet,
 		}
+
+		sourceReplicaTab = vc.Cells["zone1"].Keyspaces[targetKeyspaceName].Shards["-80"].Tablets["zone1-201"].Vttablet
+		require.NotNil(t, sourceReplicaTab)
+		sourceTab = vc.Cells["zone1"].Keyspaces[targetKeyspaceName].Shards["-80"].Tablets["zone1-200"].Vttablet
+		require.NotNil(t, sourceTab)
+
+		targetTab1 = tablets["-40"]
+		require.NotNil(t, targetTab1)
+		targetTab2 = tablets["40-80"]
+		require.NotNil(t, targetTab2)
+		targetReplicaTab1 = vc.Cells["zone1"].Keyspaces[targetKeyspaceName].Shards["-40"].Tablets["zone1-401"].Vttablet
+		require.NotNil(t, targetReplicaTab1)
+
 		splitShard(t, targetKeyspaceName, reshardWorkflowName, sourceShard, newShards, tablets)
 	})
 }
@@ -121,6 +150,7 @@ func getMoveTablesShowResponse(mt *iMoveTables) *vtctldatapb.GetWorkflowsRespons
 // Validates some of the flags created from the previous test.
 func testMoveTablesFlags2(t *testing.T, mt *iMoveTables, sourceKeyspace, targetKeyspace, workflowName string, targetTabs map[string]*cluster.VttabletProcess) {
 	ksWorkflow := fmt.Sprintf("%s.%s", targetKeyspace, workflowName)
+	wf := (*mt).(iWorkflow)
 	(*mt).Start() // Need to start because we set auto-start to false.
 	waitForWorkflowState(t, vc, ksWorkflow, binlogdatapb.VReplicationWorkflowState_Stopped.String())
 	confirmNoRoutingRules(t)
@@ -140,7 +170,85 @@ func testMoveTablesFlags2(t *testing.T, mt *iMoveTables, sourceKeyspace, targetK
 	for _, tab := range targetTabs {
 		catchup(t, tab, workflowName, "MoveTables")
 	}
+
+	(*mt).SwitchReads()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateReadsSwitched)
+
+	(*mt).ReverseReads()
+	validateReadsRouteToSource(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", targetKs, sourceKs)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateReadsSwitched, wrangler.WorkflowStateNotSwitched)
+
 	(*mt).SwitchReadsAndWrites()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateWritesRouteToTarget(t)
+	validateTableRoutingRule(t, "customer", "", sourceKs, targetKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	(*mt).ReverseReadsAndWrites()
+	validateReadsRouteToSource(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", targetKs, sourceKs)
+	validateWritesRouteToSource(t)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateNotSwitched)
+
+	(*mt).SwitchReadsAndWrites()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateWritesRouteToTarget(t)
+	validateTableRoutingRule(t, "customer", "", sourceKs, targetKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	(*mt).ReverseReads()
+	validateReadsRouteToSource(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", targetKs, sourceKs)
+	validateWritesRouteToTarget(t)
+	validateTableRoutingRule(t, "customer", "", sourceKs, targetKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateWritesSwitched)
+
+	(*mt).ReverseWrites()
+	validateReadsRouteToSource(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", targetKs, sourceKs)
+	validateWritesRouteToSource(t)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateWritesSwitched, wrangler.WorkflowStateNotSwitched)
+
+	(*mt).SwitchReadsAndWrites()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateWritesRouteToTarget(t)
+	validateTableRoutingRule(t, "customer", "", sourceKs, targetKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	(*mt).ReverseWrites()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateWritesRouteToSource(t)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateReadsSwitched)
+
+	(*mt).ReverseReads()
+	validateReadsRouteToSource(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", targetKs, sourceKs)
+	validateWritesRouteToSource(t)
+	validateTableRoutingRule(t, "customer", "", targetKs, sourceKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateReadsSwitched, wrangler.WorkflowStateNotSwitched)
+
+	// Confirm that everything is still in sync after our switch fest.
+	vdiff(t, targetKeyspace, workflowName, "zone1", false, true, nil)
+
+	(*mt).SwitchReadsAndWrites()
+	validateReadsRouteToTarget(t, "replica")
+	validateTableRoutingRule(t, "customer", "replica", sourceKs, targetKs)
+	validateWritesRouteToTarget(t)
+	validateTableRoutingRule(t, "customer", "", sourceKs, targetKs)
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
 	(*mt).Complete()
 	confirmRoutingRulesExist(t)
 	// Confirm that --keep-data was honored.
@@ -212,6 +320,7 @@ func splitShard(t *testing.T, keyspace, workflowName, sourceShards, targetShards
 	}, workflowFlavorVtctld)
 
 	ksWorkflow := fmt.Sprintf("%s.%s", keyspace, workflowName)
+	wf := rs.(iWorkflow)
 	rs.Create()
 	validateReshardResponse(rs)
 	workflowResponse := getWorkflow(keyspace, workflowName)
@@ -238,15 +347,121 @@ func splitShard(t *testing.T, keyspace, workflowName, sourceShards, targetShards
 	}
 	vdiff(t, keyspace, workflowName, "zone1", false, true, nil)
 
+	shardReadsRouteToSource := func() {
+		require.True(t, getShardRoute(t, keyspace, "-80", "replica"))
+	}
+
+	shardReadsRouteToTarget := func() {
+		require.True(t, getShardRoute(t, keyspace, "-40", "replica"))
+	}
+
+	shardWritesRouteToSource := func() {
+		require.True(t, getShardRoute(t, keyspace, "-80", "primary"))
+	}
+
+	shardWritesRouteToTarget := func() {
+		require.True(t, getShardRoute(t, keyspace, "-40", "primary"))
+	}
+
 	rs.SwitchReadsAndWrites()
 	waitForLowLag(t, keyspace, workflowName+"_reverse")
 	vdiff(t, keyspace, workflowName+"_reverse", "zone1", true, false, nil)
+	shardReadsRouteToTarget()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
 
 	rs.ReverseReadsAndWrites()
 	waitForLowLag(t, keyspace, workflowName)
 	vdiff(t, keyspace, workflowName, "zone1", false, true, nil)
+	shardReadsRouteToSource()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateNotSwitched)
+
+	rs.SwitchReads()
+	shardReadsRouteToTarget()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateReadsSwitched)
+
+	rs.ReverseReads()
+	shardReadsRouteToSource()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateReadsSwitched, wrangler.WorkflowStateNotSwitched)
+
 	rs.SwitchReadsAndWrites()
+	shardReadsRouteToTarget()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	rs.ReverseReadsAndWrites()
+	shardReadsRouteToSource()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateNotSwitched)
+
+	rs.SwitchReadsAndWrites()
+	shardReadsRouteToTarget()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	rs.ReverseReads()
+	shardReadsRouteToSource()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateWritesSwitched)
+
+	rs.ReverseWrites()
+	shardReadsRouteToSource()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateWritesSwitched, wrangler.WorkflowStateNotSwitched)
+
+	rs.SwitchReadsAndWrites()
+	shardReadsRouteToTarget()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
+	rs.ReverseWrites()
+	shardReadsRouteToTarget()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateAllSwitched, wrangler.WorkflowStateReadsSwitched)
+
+	rs.ReverseReads()
+	shardReadsRouteToSource()
+	shardWritesRouteToSource()
+	confirmStates(t, &wf, wrangler.WorkflowStateReadsSwitched, wrangler.WorkflowStateNotSwitched)
+
+	// Confirm that everything is still in sync after our switch fest.
+	vdiff(t, keyspace, workflowName, "zone1", false, true, nil)
+
+	rs.SwitchReadsAndWrites()
+	shardReadsRouteToTarget()
+	shardWritesRouteToTarget()
+	confirmStates(t, &wf, wrangler.WorkflowStateNotSwitched, wrangler.WorkflowStateAllSwitched)
+
 	rs.Complete()
+}
+
+func getSrvKeyspace(t *testing.T, keyspace string) *topodatapb.SrvKeyspace {
+	output, err := vc.VtctldClient.ExecuteCommandWithOutput("GetSrvKeyspaces", keyspace, "zone1")
+	require.NoError(t, err)
+	var srvKeyspaces map[string]*topodatapb.SrvKeyspace
+	err = json2.Unmarshal([]byte(output), &srvKeyspaces)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(srvKeyspaces))
+	return srvKeyspaces["zone1"]
+}
+
+func getShardRoute(t *testing.T, keyspace, shard string, tabletType string) bool {
+	srvKeyspace := getSrvKeyspace(t, keyspace)
+	for _, partition := range srvKeyspace.Partitions {
+		tt, err := topoproto.ParseTabletType(tabletType)
+		require.NoError(t, err)
+		if partition.ServedType == tt {
+			for _, shardReference := range partition.ShardReferences {
+				if shardReference.Name == shard {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func getReshardShowResponse(rs *iReshard) *vtctldatapb.GetWorkflowsResponse {
@@ -388,4 +603,9 @@ func validateMoveTablesWorkflow(t *testing.T, workflows []*vtctldatapb.Workflow)
 	require.Equalf(t, 1, len(bls.Filter.Rules), "Rules are %+v", bls.Filter.Rules) // only customer, customer2 should be excluded
 	require.Equal(t, binlogdatapb.OnDDLAction_STOP, bls.OnDdl)
 	require.True(t, bls.StopAfterCopy)
+}
+
+func confirmStates(t *testing.T, workflow *iWorkflow, startState, endState string) {
+	require.Contains(t, (*workflow).GetLastOutput(), fmt.Sprintf("Start State: %s", startState))
+	require.Contains(t, (*workflow).GetLastOutput(), fmt.Sprintf("Current State: %s", endState))
 }
