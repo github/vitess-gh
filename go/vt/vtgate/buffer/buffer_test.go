@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"vitess.io/vitess/go/vt/topo/topoproto"
 	"vitess.io/vitess/go/vt/vterrors"
 
@@ -67,6 +69,32 @@ var (
 		PortMap:  map[string]int32{"vt": int32(101)},
 	}
 )
+
+func TestIsErrorDueToReparenting(t *testing.T) {
+	testcases := []struct {
+		err  error
+		want bool
+	}{
+		{
+			err:  vterrors.Errorf(vtrpcpb.Code_CLUSTER_EVENT, ClusterEventReshardingInProgress),
+			want: false,
+		},
+		{
+			err:  vterrors.Errorf(vtrpcpb.Code_CLUSTER_EVENT, ClusterEventReparentInProgress),
+			want: true,
+		},
+		{
+			err:  vterrors.Errorf(vtrpcpb.Code_CLUSTER_EVENT, "The MySQL server is running with the --super-read-only option"),
+			want: true,
+		},
+	}
+	for _, tt := range testcases {
+		t.Run(tt.err.Error(), func(t *testing.T) {
+			got := IsErrorDueToReparenting(tt.err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestBuffering(t *testing.T) {
 	testAllImplementations(t, testBuffering1)
