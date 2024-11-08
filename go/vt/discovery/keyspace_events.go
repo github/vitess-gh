@@ -474,6 +474,7 @@ func (kss *keyspaceState) getMoveTablesStatus(vs *vschemapb.SrvVSchema) (*MoveTa
 	mu := sync.Mutex{}
 	eg, ectx := errgroup.WithContext(shortCtx)
 	for _, sstate := range kss.shards {
+		sstate := sstate
 		eg.Go(func() error {
 			si, err := ts.GetShard(ectx, kss.keyspace, sstate.target.Shard)
 			if err != nil {
