@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
 
@@ -64,10 +65,12 @@ func testCancel(t *testing.T) {
 	mt.SwitchReadsAndWrites()
 	checkDenyList(targetKeyspace, false)
 	checkDenyList(sourceKeyspace, true)
+	time.Sleep(loadTestBufferingWindowDuration + 1*time.Second)
 
 	mt.ReverseReadsAndWrites()
 	checkDenyList(targetKeyspace, true)
 	checkDenyList(sourceKeyspace, false)
+	time.Sleep(loadTestBufferingWindowDuration + 1*time.Second)
 
 	mt.Cancel()
 	checkDenyList(targetKeyspace, false)
@@ -108,6 +111,7 @@ func TestPartialMoveTablesBasic(t *testing.T) {
 	// sharded customer keyspace.
 	createMoveTablesWorkflow(t, "customer,loadtest,customer2")
 	tstWorkflowSwitchReadsAndWrites(t)
+	time.Sleep(loadTestBufferingWindowDuration + 1*time.Second)
 	tstWorkflowComplete(t)
 
 	emptyGlobalRoutingRules := "{}\n"
@@ -218,6 +222,7 @@ func TestPartialMoveTablesBasic(t *testing.T) {
 	expectedSwitchOutput := fmt.Sprintf("SwitchTraffic was successful for workflow %s.%s\n\nStart State: Reads Not Switched. Writes Not Switched\nCurrent State: Reads partially switched, for shards: %s. Writes partially switched, for shards: %s\n\n",
 		targetKs, wfName, shard, shard)
 	require.Equal(t, expectedSwitchOutput, lastOutput)
+	time.Sleep(loadTestBufferingWindowDuration + 1*time.Second)
 
 	// Confirm global routing rules -- everything should still be routed
 	// to the source side, customer, globally.
@@ -296,6 +301,7 @@ func TestPartialMoveTablesBasic(t *testing.T) {
 	expectedSwitchOutput = fmt.Sprintf("SwitchTraffic was successful for workflow %s.%s\n\nStart State: Reads partially switched, for shards: 80-. Writes partially switched, for shards: 80-\nCurrent State: All Reads Switched. All Writes Switched\n\n",
 		targetKs, wfName)
 	require.Equal(t, expectedSwitchOutput, lastOutput)
+	time.Sleep(loadTestBufferingWindowDuration + 1*time.Second)
 
 	// Confirm global routing rules: everything should still be routed
 	// to the source side, customer, globally.
