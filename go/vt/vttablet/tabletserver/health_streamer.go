@@ -317,8 +317,10 @@ func (hs *healthStreamer) SetUnhealthyThreshold(v time.Duration) {
 // so it can read and write to the MySQL instance for schema-tracking.
 func (hs *healthStreamer) MakePrimary(serving bool) {
 	hs.fieldsMu.Lock()
-	defer hs.fieldsMu.Unlock()
 	hs.isServingPrimary = serving
+	// We let go of the lock here because we don't want to hold the lock when calling RegisterNotifier.
+	// If we keep holding the lock, there is a potential deadlock that can happen.
+	hs.fieldsMu.Unlock()
 	// We register for notifications from the schema Engine only when schema tracking is enabled,
 	// and we are going to a serving primary state.
 	if serving && hs.signalWhenSchemaChange {
@@ -344,7 +346,7 @@ func (hs *healthStreamer) reload(full map[string]*schema.Table, created, altered
 	// Schema Reload to happen only on primary when it is serving.
 	// We can be in a state when the primary is not serving after we have run DemotePrimary. In that case,
 	// we don't want to run any queries in MySQL, so we shouldn't reload anything in the healthStreamer.
-	if !hs.isServingPrimary {
+	if !hs.isServingPrimary || hs.conns == nil {
 		return nil
 	}
 
