@@ -723,11 +723,15 @@ func (qre *QueryExecutor) execSelect() (*sqltypes.Result, error) {
 	}
 	conn, err := qre.getConn()
 	if err != nil {
+		log.Errorf("====================== ERROR WHEN TRYING TO GET CONNECTION FROM POOL: %s", err.Error())
 		return nil, err
 	}
 	defer conn.Recycle()
+
+	log.Info("====================== NO ERROR WHEN TRYING TO GET CONNECTION FROM POOL")
 	res, err := qre.execDBConn(conn.Conn, sql, true)
 	if err != nil {
+		log.Errorf("=========================== ERROR WHEN EXECUTING WITH CONNECTION: %s", err.Error())
 		return nil, err
 	}
 	return res, nil
