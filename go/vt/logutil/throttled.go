@@ -55,30 +55,32 @@ var (
 )
 
 func (tl *ThrottledLogger) log(logF logFunc, format string, v ...any) {
-	now := time.Now()
+	// now := time.Now()
 
 	tl.mu.Lock()
 	defer tl.mu.Unlock()
-	logWaitTime := tl.maxInterval - (now.Sub(tl.lastlogTime))
-	if logWaitTime < 0 {
-		tl.lastlogTime = now
-		logF(2, fmt.Sprintf(tl.name+": "+format, v...))
-		return
-	}
-	// If this is the first message to be skipped, start a goroutine
-	// to log and reset skippedCount
-	if tl.skippedCount == 0 {
-		go func(d time.Duration) {
-			<-time.After(d)
-			tl.mu.Lock()
-			defer tl.mu.Unlock()
-			// Because of the go func(), we lose the stack trace,
-			// so we just use the current line for this.
-			logF(0, fmt.Sprintf("%v: skipped %v log messages", tl.name, tl.skippedCount))
-			tl.skippedCount = 0
-		}(logWaitTime)
-	}
-	tl.skippedCount++
+	// logWaitTime := tl.maxInterval - (now.Sub(tl.lastlogTime))
+	// if logWaitTime < 0 {
+	// 	tl.lastlogTime = now
+	logF(2, fmt.Sprintf(tl.name+": "+format, v...))
+	// return
+	// }
+	// // If this is the first message to be skipped, start a goroutine
+	// // to log and reset skippedCount
+	//
+	//	if tl.skippedCount == 0 {
+	//		go func(d time.Duration) {
+	//			<-time.After(d)
+	//			tl.mu.Lock()
+	//			defer tl.mu.Unlock()
+	//			// Because of the go func(), we lose the stack trace,
+	//			// so we just use the current line for this.
+	//			logF(0, fmt.Sprintf("%v: skipped %v log messages", tl.name, tl.skippedCount))
+	//			tl.skippedCount = 0
+	//		}(logWaitTime)
+	//	}
+	//
+	// tl.skippedCount++
 }
 
 // Infof logs an info if not throttled.
