@@ -511,12 +511,14 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 		start := time.Now()
 		conn, err = pool.wait.waitForConn(ctx, nil)
 		if err != nil {
+			log.Errorf("===================== ERROR: waitForConn err: %s", err.Error())
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
 	}
 	// no connections available and no connections to wait for (pool is closed)
 	if conn == nil {
+		log.Errorf("====================== ERROR: conn == nil err")
 		return nil, ErrTimeout
 	}
 
@@ -568,12 +570,14 @@ func (pool *ConnPool[C]) getWithSetting(ctx context.Context, setting *Setting) (
 		start := time.Now()
 		conn, err = pool.wait.waitForConn(ctx, setting)
 		if err != nil {
+			log.Errorf("===================== getWithSetting ERROR: waitForConn err: %s", err.Error())
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
 	}
 	// no connections available and no connections to wait for (pool is closed)
 	if conn == nil {
+		log.Errorf("====================== getWithSetting ERROR: conn == nil err")
 		return nil, ErrTimeout
 	}
 
