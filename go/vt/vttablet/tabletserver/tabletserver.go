@@ -1560,6 +1560,7 @@ func (tsv *TabletServer) execRequest(
 	}()
 
 	err = exec(ctx, logStats)
+	log.Errorf("============================ EXEC ERROR: %s", err.Error())
 	if err != nil {
 		return tsv.convertAndLogError(ctx, sql, bindVariables, err, logStats)
 	}
