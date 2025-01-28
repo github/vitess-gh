@@ -378,6 +378,7 @@ func (pool *ConnPool[C]) put(conn *Pooled[C]) {
 		var err error
 		conn, err = pool.connNew(context.Background())
 		if err != nil {
+			log.Errorf("======================== connNew ERROR: %s", err)
 			pool.closedConn()
 			return
 		}
