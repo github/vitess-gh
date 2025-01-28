@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"vitess.io/vitess/go/hack"
 	"vitess.io/vitess/go/vt/log"
 	vtrpcpb "vitess.io/vitess/go/vt/proto/vtrpc"
@@ -510,17 +509,10 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 	// to other clients, wait until one of the connections is returned
 	if conn == nil {
 		start := time.Now()
-
-		oldPool := spew.Sdump(pool)
-
 		conn, err = pool.wait.waitForConn(ctx, nil)
 		if err != nil {
-
 			log.Errorf("===================== ERROR: waitForConn err: %s", err.Error())
-			log.Errorf("Old pool")
-			log.Errorf(oldPool)
-			log.Errorf("New pool")
-			log.Errorf(spew.Sdump(pool))
+			log.Errorf("%+v", pool)
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)

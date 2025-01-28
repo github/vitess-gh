@@ -18,11 +18,9 @@ package smartconnpool
 
 import (
 	"context"
-	"runtime/debug"
 	"sync"
 
 	"vitess.io/vitess/go/list"
-	"vitess.io/vitess/go/vt/log"
 )
 
 // waiter represents a client waiting for a connection in the waitlist
@@ -73,9 +71,6 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting) (*Pool
 	if conn != nil {
 		return conn, nil
 	}
-
-	log.Errorf("======================== STACK TRACE")
-	debug.PrintStack()
 	return nil, ctx.Err()
 }
 
