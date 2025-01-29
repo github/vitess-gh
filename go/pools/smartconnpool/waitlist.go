@@ -111,7 +111,7 @@ func (wl *waitlist[D]) tryReturnConn(conn *Pooled[D]) bool {
 	// fast path: if there's nobody waiting there's nothing to do
 	if wl.list.Len() == 0 {
 		// HACK: we're gonna sleep for a bit and try again, to see if there are still no waiters
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 		if wl.list.Len() == 0 {
 			log.Error("======================= WE HIT THE FAST PATH, WE'RE RETURNING")
 			return false
