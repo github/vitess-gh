@@ -18,6 +18,7 @@ package smartconnpool
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -510,10 +511,12 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 	// to other clients, wait until one of the connections is returned
 	if conn == nil {
 		start := time.Now()
+
+		oldPool := fmt.Sprintf("%+v", pool)
 		conn, err = pool.wait.waitForConn(ctx, nil)
 		if err != nil {
 			log.Errorf("===================== ERROR: waitForConn err: %s", err.Error())
-			log.Errorf("%+v", pool)
+			log.Errorf("Old pool: \n%s\n=================\nNew pool: \n%+v", oldPool, pool)
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
