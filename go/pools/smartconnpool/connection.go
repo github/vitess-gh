@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"vitess.io/vitess/go/vt/log"
 )
 
 type Connection interface {
@@ -45,6 +47,7 @@ func (dbc *Pooled[C]) Close() {
 }
 
 func (dbc *Pooled[C]) Recycle() {
+	log.Errorf("========================== IM RECYCLING THE CONNECTION\nconn:\n%+v\npool:\n%+v", dbc, dbc.pool)
 	switch {
 	case dbc.pool == nil:
 		dbc.Conn.Close()

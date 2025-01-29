@@ -697,12 +697,14 @@ func (qre *QueryExecutor) execSelect() (*sqltypes.Result, error) {
 	}
 	// Check tablet type.
 	if qre.shouldConsolidate() {
+		log.Error("============================== WE'RE CONSOLIDATING")
 		q, original := qre.tsv.qe.consolidator.Create(sqlWithoutComments)
 		if original {
 			defer q.Broadcast()
 			conn, err := qre.getConn()
 
 			if err != nil {
+				log.Errorf("=========================== ERROR WHEN TRYING TO GET CONNECTION WHEN CONSOLIDATING: %s", err)
 				q.SetErr(err)
 			} else {
 				defer conn.Recycle()
