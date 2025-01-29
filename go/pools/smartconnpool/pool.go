@@ -396,9 +396,7 @@ func (pool *ConnPool[C]) put(conn *Pooled[C]) {
 		}
 	}
 
-	log.Error("========================== I'M TRYING TO RETURN A CONNECTION HERE")
 	if !pool.wait.tryReturnConn(conn) {
-		log.Error("============================= tryReturnConn returned false, we're in that branch")
 		connSetting := conn.Conn.Setting()
 		if connSetting == nil {
 			pool.clean.Push(conn)
