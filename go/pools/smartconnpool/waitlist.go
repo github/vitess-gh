@@ -18,9 +18,11 @@ package smartconnpool
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 
 	"vitess.io/vitess/go/list"
+	"vitess.io/vitess/go/vt/log"
 )
 
 // waiter represents a client waiting for a connection in the waitlist
@@ -57,10 +59,14 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting) (*Pool
 	wl.mu.Lock()
 	// add ourselves as a waiter at the end of the waitlist
 	wl.list.PushBackValue(elem)
+	log.Errorf("========================== THIS IS WHAT THE WAITLIST LOOKS LIKE BEFORE I START WAITING:\n%+v", wl)
 	wl.mu.Unlock()
 
 	// block on our waiter's semaphore until somebody can hand over a connection to us
+	i := rand.Int()
+	log.Errorf("======================= %d: I'M WAITING", i)
 	elem.Value.sema.wait()
+	log.Error("======================== %d: I'M DONE WAITING", i)
 
 	// we're awake -- the conn in our waiter contains the connection that was handed
 	// over to us, or nothing if we've been waken up forcefully. save the conn before
@@ -108,6 +114,7 @@ func (wl *waitlist[C]) expire(force bool) {
 func (wl *waitlist[D]) tryReturnConn(conn *Pooled[D]) bool {
 	// fast path: if there's nobody waiting there's nothing to do
 	if wl.list.Len() == 0 {
+		log.Error("======================= WE HIT THE FAST PATH, WE'RE RETURNING")
 		return false
 	}
 	// split the slow path into a separate function to enable inlining
@@ -146,8 +153,11 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	// maybe there isn't anybody to hand over the connection to, because we've
 	// raced with another client returning another connection
 	if target == nil {
+		log.Error("====================== target was nil, we couldn't find someone to give the connection to")
 		return false
 	}
+
+	log.Errorf("===================== WE'VE FOUND A TARGET: %+v", target)
 
 	// if we have a target to return the connection to, simply write the connection
 	// into the waiter and signal their semaphore. they'll wake up to pick up the
