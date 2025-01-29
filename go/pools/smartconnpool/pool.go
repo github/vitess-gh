@@ -516,7 +516,7 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 		conn, err = pool.wait.waitForConn(ctx, nil)
 		if err != nil {
 			log.Errorf("===================== ERROR: waitForConn err: %s", err.Error())
-			log.Errorf("Old pool: \n%s\n=================\nNew pool: \n%+v", oldPool, pool)
+			log.Errorf("ctx:\n%+v\nOld pool: \n%s\n=================\nNew pool: \n%+v", ctx, oldPool, pool)
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
