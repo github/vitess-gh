@@ -9,7 +9,7 @@ permissions: read-all
 jobs:
   build:
     name: Static Code Checks Etc
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Skip CI
@@ -27,7 +27,7 @@ jobs:
             skip='true'
           fi
           echo Skip ${skip}
-          echo "skip-workflow=${skip}" >> $GITHUB_OUTPUT  
+          echo "skip-workflow=${skip}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         if: steps.skip-workflow.outputs.skip-workflow == 'false'
