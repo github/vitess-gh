@@ -17,7 +17,7 @@ jobs:
   upgrade_downgrade_test:
     timeout-minutes: 60
     name: Run Upgrade Downgrade Test - Reparent New Vtctl
-    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-24.04' }}
 
     steps:
     - name: Skip CI

@@ -15,7 +15,7 @@ permissions: read-all
 jobs:
   build_and_push:
     name: Build and push vitess/lite Docker images
-    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-24.04' }}
     if: github.repository == 'vitessio/vitess'
 
     strategy:

@@ -70,7 +70,7 @@ jobs:
               exit 1
             fi
           fi
-          
+
 
       - name: Do Not Merge label
         run: |
