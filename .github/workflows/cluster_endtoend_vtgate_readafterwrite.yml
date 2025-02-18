@@ -17,7 +17,7 @@ jobs:
   build:
     timeout-minutes: 60
     name: Run endtoend tests on Cluster (vtgate_readafterwrite)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Skip CI
@@ -96,7 +96,7 @@ jobs:
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.end_to_end == 'true'
       timeout-minutes: 10
       run: |
-        
+
         # Get key to latest MySQL repo
         sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A8D3785C
         # Setup MySQL 8.0

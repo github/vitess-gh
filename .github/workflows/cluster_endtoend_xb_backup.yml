@@ -17,7 +17,7 @@ jobs:
   build:
     timeout-minutes: 60
     name: Run endtoend tests on Cluster (xb_backup)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Skip CI
@@ -96,7 +96,7 @@ jobs:
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.end_to_end == 'true'
       timeout-minutes: 10
       run: |
-        
+
         # Setup Percona Server for MySQL 8.0
         sudo apt-get update
         sudo apt-get install -y lsb-release gnupg2 curl

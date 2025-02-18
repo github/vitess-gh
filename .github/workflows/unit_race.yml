@@ -10,7 +10,7 @@ jobs:
 
   build:
     name: Unit Test (Race)
-    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-22.04' }}
     steps:
     - name: Skip CI
       run: |
