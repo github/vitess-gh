@@ -3273,7 +3273,6 @@ func (s *Server) switchWrites(ctx context.Context, req *vtctldatapb.WorkflowSwit
 				time.Sleep(lockTablesCycleDelay)
 			}
 		}
-
 		ts.Logger().Infof("Waiting for streams to catchup")
 		if err := sw.waitForCatchup(ctx, timeout); err != nil {
 			if cerr := sw.cancelMigration(ctx, sm); cerr != nil {
