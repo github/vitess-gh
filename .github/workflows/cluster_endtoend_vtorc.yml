@@ -96,7 +96,7 @@ jobs:
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.end_to_end == 'true'
       timeout-minutes: 10
       run: |
-
+        
         # Get key to latest MySQL repo
         sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A8D3785C
         # Setup MySQL 8.0
