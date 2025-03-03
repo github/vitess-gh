@@ -17,7 +17,7 @@ jobs:
       matrix:
         branch: [ main, release-19.0, release-18.0, release-17.0, release-16.0 ]
     name: Update Golang Version
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -47,7 +47,7 @@ jobs:
           if [ -z "${output}" ]; then
             exit 0
           fi
-          
+
           go_version=$(go run ./go/tools/go-upgrade/go-upgrade.go get go-version)
           bootstrap_version=$(go run ./go/tools/go-upgrade/go-upgrade.go get bootstrap-version)
           echo "go-version=${go_version}" >> $GITHUB_OUTPUT
