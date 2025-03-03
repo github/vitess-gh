@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,11 +31,9 @@ import (
 
 	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/vt/log"
-	"vitess.io/vitess/go/vt/topo/topoproto"
 	"vitess.io/vitess/go/vt/wrangler"
 
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
-	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
 	vtctldatapb "vitess.io/vitess/go/vt/proto/vtctldata"
 )
 
@@ -338,6 +335,7 @@ func validateReadsRoute(t *testing.T, tabletTypes string, tablet *cluster.Vttabl
 		if strings.Contains(tabletTypes, tt) {
 			readQuery := "select * from customer"
 			assertQueryExecutesOnTablet(t, vtgateConn, tablet, destination, readQuery, readQuery)
+
 		}
 	}
 }
