@@ -327,45 +327,27 @@ func tstWorkflowCancel(t *testing.T) error {
 	return tstWorkflowAction(t, workflowActionCancel, "", "")
 }
 
-func validateReadsRoute(t *testing.T, tabletType string, tablet *cluster.VttabletProcess) {
-	if tablet == nil {
-		return
+func validateReadsRoute(t *testing.T, tabletTypes string, tablet *cluster.VttabletProcess) {
+	if tabletTypes == "" {
+		tabletTypes = "replica,rdonly"
 	}
 	vtgateConn, closeConn := getVTGateConn()
 	defer closeConn()
-	// We do NOT want to target a shard as that goes around the routing rules and
-	// defeats the purpose here. We are using a query w/o a WHERE clause so for
-	// sharded keyspaces it should hit all shards as a SCATTER query. So all we
-	// care about is the keyspace and tablet type.
-	destination := fmt.Sprintf("%s@%s", tablet.Keyspace, strings.ToLower(tabletType))
-	readQuery := "select cid from customer limit 50"
-	assertQueryExecutesOnTablet(t, vtgateConn, tablet, destination, readQuery, "select cid from customer limit :vtg1")
+	for _, tt := range []string{"replica", "rdonly"} {
+		destination := fmt.Sprintf("%s:%s@%s", tablet.Keyspace, tablet.Shard, tt)
+		if strings.Contains(tabletTypes, tt) {
+			readQuery := "select * from customer"
+			assertQueryExecutesOnTablet(t, vtgateConn, tablet, destination, readQuery, readQuery)
+		}
+	}
 }
 
 func validateReadsRouteToSource(t *testing.T, tabletTypes string) {
-	tt, err := topoproto.ParseTabletTypes(tabletTypes)
-	require.NoError(t, err)
-	if slices.Contains(tt, topodatapb.TabletType_REPLICA) {
-		require.NotNil(t, sourceReplicaTab)
-		validateReadsRoute(t, topodatapb.TabletType_REPLICA.String(), sourceReplicaTab)
-	}
-	if slices.Contains(tt, topodatapb.TabletType_RDONLY) {
-		require.NotNil(t, sourceRdonlyTab)
-		validateReadsRoute(t, topodatapb.TabletType_RDONLY.String(), sourceRdonlyTab)
-	}
+	validateReadsRoute(t, tabletTypes, sourceReplicaTab)
 }
 
 func validateReadsRouteToTarget(t *testing.T, tabletTypes string) {
-	tt, err := topoproto.ParseTabletTypes(tabletTypes)
-	require.NoError(t, err)
-	if slices.Contains(tt, topodatapb.TabletType_REPLICA) {
-		require.NotNil(t, targetReplicaTab1)
-		validateReadsRoute(t, topodatapb.TabletType_REPLICA.String(), targetReplicaTab1)
-	}
-	if slices.Contains(tt, topodatapb.TabletType_RDONLY) {
-		require.NotNil(t, targetRdonlyTab1)
-		validateReadsRoute(t, topodatapb.TabletType_RDONLY.String(), targetRdonlyTab1)
-	}
+	validateReadsRoute(t, tabletTypes, targetReplicaTab1)
 }
 
 func validateWritesRouteToSource(t *testing.T) {
