@@ -101,6 +101,13 @@ const (
 // TrafficSwitchDirection specifies the switching direction.
 type TrafficSwitchDirection int
 
+func (tsd TrafficSwitchDirection) String() string {
+	if tsd == DirectionForward {
+		return "forward"
+	}
+	return "backward"
+}
+
 // TableRemovalType specifies the way the a table will be removed during a
 // DropSource for a MoveTables workflow.
 type TableRemovalType int
