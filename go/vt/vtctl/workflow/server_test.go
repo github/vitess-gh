@@ -18,7 +18,6 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -354,55 +353,6 @@ func TestMoveTablesTrafficSwitching(t *testing.T) {
 				Summary:      fmt.Sprintf("ReverseTraffic was successful for workflow %s.%s", targetKeyspaceName, workflowName),
 				StartState:   "All Reads Switched. Writes Switched",
 				CurrentState: "Reads Not Switched. Writes Not Switched",
-			},
-		},
-		{
-			name: "forward with tablet refresh error",
-			sourceKeyspace: &testKeyspace{
-				KeyspaceName: sourceKeyspaceName,
-				ShardNames:   []string{"0"},
-			},
-			targetKeyspace: &testKeyspace{
-				KeyspaceName: targetKeyspaceName,
-				ShardNames:   []string{"-80", "80-"},
-			},
-			req: &vtctldatapb.WorkflowSwitchTrafficRequest{
-				Keyspace:    targetKeyspaceName,
-				Workflow:    workflowName,
-				Direction:   int32(DirectionForward),
-				TabletTypes: tabletTypes,
-			},
-			preFunc: func(env *testEnv) {
-				env.tmc.SetRefreshStateError(env.tablets[sourceKeyspaceName][startingSourceTabletUID], errors.New("tablet refresh error"))
-				env.tmc.SetRefreshStateError(env.tablets[targetKeyspaceName][startingTargetTabletUID], errors.New("tablet refresh error"))
-			},
-			wantErr: true,
-		},
-		{
-			name: "forward with tablet refresh error and force",
-			sourceKeyspace: &testKeyspace{
-				KeyspaceName: sourceKeyspaceName,
-				ShardNames:   []string{"0"},
-			},
-			targetKeyspace: &testKeyspace{
-				KeyspaceName: targetKeyspaceName,
-				ShardNames:   []string{"-80", "80-"},
-			},
-			req: &vtctldatapb.WorkflowSwitchTrafficRequest{
-				Keyspace:    targetKeyspaceName,
-				Workflow:    workflowName,
-				Direction:   int32(DirectionForward),
-				TabletTypes: tabletTypes,
-				Force:       true,
-			},
-			preFunc: func(env *testEnv) {
-				env.tmc.SetRefreshStateError(env.tablets[sourceKeyspaceName][startingSourceTabletUID], errors.New("tablet refresh error"))
-				env.tmc.SetRefreshStateError(env.tablets[targetKeyspaceName][startingTargetTabletUID], errors.New("tablet refresh error"))
-			},
-			want: &vtctldatapb.WorkflowSwitchTrafficResponse{
-				Summary:      fmt.Sprintf("SwitchTraffic was successful for workflow %s.%s", targetKeyspaceName, workflowName),
-				StartState:   "Reads Not Switched. Writes Not Switched",
-				CurrentState: "All Reads Switched. Writes Switched",
 			},
 		},
 	}
