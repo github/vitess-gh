@@ -43,6 +43,12 @@ type ConnectionPool struct {
 	name          string
 }
 
+// usedNames is for preventing expvar from panicking. Tests
+// create pool objects multiple time. If a name was previously
+// used, expvar initialization is skipped.
+// through non-test code.
+var usedNames = make(map[string]bool)
+
 // NewConnectionPool creates a new ConnectionPool. The name is used
 // to publish stats only.
 func NewConnectionPool(name string, stats *servenv.Exporter, capacity int, idleTimeout time.Duration, maxLifetime time.Duration, dnsResolutionFrequency time.Duration) *ConnectionPool {
