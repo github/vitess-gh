@@ -318,7 +318,7 @@ func (vs *vstreamer) parseEvents(ctx context.Context, events <-chan mysql.Binlog
 				default:
 					// Do nothing special.
 				}
-				logger.Infof("vstreamer throttled%s: %s.", wfNameLog, checkResult.Summary())
+				logger.Infof("vstreamer throttled%s.", wfNameLog)
 				continue
 			}
 			select {
