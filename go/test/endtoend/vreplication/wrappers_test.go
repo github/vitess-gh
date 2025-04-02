@@ -258,13 +258,15 @@ func (v VtctldMoveTables) Status() {
 }
 
 func (v VtctldMoveTables) SwitchReads() {
-	//TODO implement me
-	panic("implement me")
+	args := []string{"SwitchTraffic", "--tablet-types=rdonly,replica"}
+	args = append(args, v.switchFlags...)
+	v.exec(args...)
 }
 
 func (v VtctldMoveTables) SwitchWrites() {
-	//TODO implement me
-	panic("implement me")
+	args := []string{"SwitchTraffic", "--tablet-types=primary"}
+	args = append(args, v.switchFlags...)
+	v.exec(args...)
 }
 
 func (v VtctldMoveTables) ReverseReads() {
