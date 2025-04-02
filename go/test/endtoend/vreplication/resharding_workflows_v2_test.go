@@ -947,3 +947,34 @@ func tstApplySchemaOnlineDDL(t *testing.T, sql string, keyspace string) {
 		"--sql", sql, keyspace)
 	require.NoError(t, err, fmt.Sprintf("ApplySchema Error: %s", err))
 }
+
+func validateTableRoutingRule(t *testing.T, table, tabletType, fromKeyspace, toKeyspace string) {
+	tabletType = strings.ToLower(strings.TrimSpace(tabletType))
+	rr := getRoutingRules(t)
+	// We set matched = true by default because it is possible, if --no-routing-rules is set while creating
+	// a workflow, that the routing rules are empty when the workflow starts.
+	// We set it to false below when the rule is found, but before matching the routed keyspace.
+	matched := true
+	for _, r := range rr.GetRules() {
+		fromRule := fmt.Sprintf("%s.%s", fromKeyspace, table)
+		if tabletType != "" && tabletType != "primary" {
+			fromRule = fmt.Sprintf("%s@%s", fromRule, tabletType)
+		}
+		if r.FromTable == fromRule {
+			// We found the rule, so we can set matched to false here and check for the routed keyspace below.
+			matched = false
+			require.NotEmpty(t, r.ToTables)
+			toTable := r.ToTables[0]
+			// The ToTables value is of the form "routedKeyspace.table".
+			routedKeyspace, routedTable, ok := strings.Cut(toTable, ".")
+			require.True(t, ok)
+			require.Equal(t, table, routedTable)
+			if routedKeyspace == toKeyspace {
+				// We found the rule, the table and keyspace matches, so our search is done.
+				matched = true
+				break
+			}
+		}
+	}
+	require.Truef(t, matched, "routing rule for %s.%s from %s to %s not found", fromKeyspace, table, tabletType, toKeyspace)
+}

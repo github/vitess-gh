@@ -38,6 +38,19 @@ import (
 	vtctldatapb "vitess.io/vitess/go/vt/proto/vtctldata"
 )
 
+var (
+	allTabletTypes = []topodatapb.TabletType{
+		topodatapb.TabletType_PRIMARY,
+		topodatapb.TabletType_REPLICA,
+		topodatapb.TabletType_RDONLY,
+	}
+
+	roTabletTypes = []topodatapb.TabletType{
+		topodatapb.TabletType_REPLICA,
+		topodatapb.TabletType_RDONLY,
+	}
+)
+
 type fakeTMC struct {
 	tmclient.TabletManagerClient
 	vrepQueriesByTablet map[string]map[string]*querypb.QueryResult
