@@ -12,14 +12,7 @@ import (
 )
 
 func TestMoveTablesBuffering(t *testing.T) {
-	ogReplicas := defaultReplicas
-	ogRdOnly := defaultRdonly
-	defer func() {
-		defaultReplicas = ogReplicas
-		defaultRdonly = ogRdOnly
-	}()
-	defaultRdonly = 0
-	defaultReplicas = 0
+	defaultRdonly = 1
 	vc = setupMinimalCluster(t)
 	defer vc.TearDown()
 
