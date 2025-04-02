@@ -9,7 +9,7 @@ permissions: read-all
 
 jobs:
   close_stale_pull_requests:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     permissions:
       pull-requests: write
 
@@ -31,4 +31,3 @@ jobs:
           close-pr-message: "This PR was closed because it has been stale for 7 days with no activity."
 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

@@ -17,7 +17,7 @@ jobs:
   upgrade_downgrade_test:
     timeout-minutes: 60
     name: Run Upgrade Downgrade Test - Query Serving (Queries)
-    runs-on: gh-hosted-runners-16cores-1-24.04
+    runs-on: ${{ github.repository_owner == 'vitessio' && 'gh-hosted-runners-16cores-1' || 'ubuntu-22.04' }}
 
     steps:
     - name: Skip CI
@@ -197,7 +197,7 @@ jobs:
       if: steps.skip-workflow.outputs.skip-workflow == 'false' && steps.changes.outputs.end_to_end == 'true'
       run: |
         source build.env
-        
+
         rm -Rf bin/*
         cp -r /tmp/vitess-build-current/bin/* $PWD/bin/
 
