@@ -2523,7 +2523,7 @@ func (s *Server) DropTargets(ctx context.Context, targetKeyspace, workflow strin
 				return nil, err
 			}
 		case binlogdatapb.MigrationType_SHARDS:
-			if err := sw.dropTargetShards(ctx); err != nil {
+			if err := sw.removeTargetTables(ctx); err != nil {
 				return nil, err
 			}
 		}
