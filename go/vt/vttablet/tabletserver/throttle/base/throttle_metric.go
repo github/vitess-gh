@@ -43,7 +43,10 @@ package base
 
 import (
 	"errors"
-	"strings"
+	"net"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // MetricResult is what we expect our probes to return. This can be a numeric result, or
@@ -66,11 +69,20 @@ var ErrNoSuchMetric = errors.New("No such metric")
 var ErrInvalidCheckType = errors.New("Unknown throttler check type")
 
 // IsDialTCPError sees if the given error indicates a TCP issue
-func IsDialTCPError(e error) bool {
-	if e == nil {
+func IsDialTCPError(err error) bool {
+	if err == nil {
 		return false
 	}
-	return strings.HasPrefix(e.Error(), "dial tcp")
+
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.Unavailable || s.Code() == codes.DeadlineExceeded
+	}
+
+	switch err := err.(type) {
+	case *net.OpError:
+		return err.Op == "dial" && err.Net == "tcp"
+	}
+	return false
 }
 
 type noHostsMetricResult struct{}
