@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,7 +58,7 @@ var (
 	targetKsOpts           = make(map[string]string)
 	httpClient             = throttlebase.SetupHTTPClient(time.Second)
 	sourceThrottlerAppName = throttlerapp.VStreamerName
-	targetThrottlerAppName = throttlerapp.VReplicationName
+	targetThrottlerAppName = throttlerapp.VPlayerName
 )
 
 const (
@@ -1167,7 +1168,7 @@ func materialize(t *testing.T, spec string, useVtctldClient bool) {
 
 func materializeProduct(t *testing.T, useVtctldClient bool) {
 	t.Run("materializeProduct", func(t *testing.T) {
-		// materializing from "product" keyspace to "customer" keyspace
+		// Materializing from "product" keyspace to "customer" keyspace.
 		workflow := "cproduct"
 		keyspace := "customer"
 		defaultCell := vc.Cells[vc.CellNames[0]]
@@ -1181,7 +1182,7 @@ func materializeProduct(t *testing.T, useVtctldClient bool) {
 
 		productTablets := vc.getVttabletsInKeyspace(t, defaultCell, "product", "primary")
 		t.Run("throttle-app-product", func(t *testing.T) {
-			// Now, throttle the streamer on source tablets, insert some rows
+			// Now, throttle the source side component (vstreamer), and insert some rows.
 			for _, tab := range productTablets {
 				body, err := throttleApp(tab, sourceThrottlerAppName)
 				assert.NoError(t, err)
@@ -1192,19 +1193,22 @@ func materializeProduct(t *testing.T, useVtctldClient bool) {
 				waitForTabletThrottlingStatus(t, tab, targetThrottlerAppName, throttlerStatusNotThrottled)
 			}
 			insertMoreProductsForSourceThrottler(t)
-			// To be fair to the test, we give the target time to apply the new changes. We expect it to NOT get them in the first place,
-			// we expect the additional rows to **not appear** in the materialized view
+			// To be fair to the test, we give the target time to apply the new changes. We
+			// expect it to NOT get them in the first place, we expect the additional rows
+			// to **not appear** in the materialized view.
 			for _, tab := range customerTablets {
 				waitForRowCountInTablet(t, tab, keyspace, workflow, 5)
+				// Confirm that we updated the stats on the target tablets as expected.
+				confirmVReplicationThrottling(t, tab, sourceKs, workflow, sourceThrottlerAppName)
 			}
 		})
 		t.Run("unthrottle-app-product", func(t *testing.T) {
-			// unthrottle on source tablets, and expect the rows to show up
+			// Unthrottle the vstreamer component, and expect the rows to show up.
 			for _, tab := range productTablets {
 				body, err := unthrottleApp(tab, sourceThrottlerAppName)
 				assert.NoError(t, err)
 				assert.Contains(t, body, sourceThrottlerAppName)
-				// give time for unthrottling to take effect and for target to fetch data
+				// Give time for unthrottling to take effect and for targets to fetch data.
 				waitForTabletThrottlingStatus(t, tab, sourceThrottlerAppName, throttlerStatusNotThrottled)
 			}
 			for _, tab := range customerTablets {
@@ -1213,8 +1217,8 @@ func materializeProduct(t *testing.T, useVtctldClient bool) {
 		})
 
 		t.Run("throttle-app-customer", func(t *testing.T) {
-			// Now, throttle vreplication (vcopier/vapplier) on target tablets, and
-			// insert some more rows.
+			// Now, throttle vreplication on the target side (vplayer), and insert some
+			// more rows.
 			for _, tab := range customerTablets {
 				body, err := throttleApp(tab, targetThrottlerAppName)
 				assert.NoError(t, err)
@@ -1229,6 +1233,8 @@ func materializeProduct(t *testing.T, useVtctldClient bool) {
 			// rows to **not appear** in the materialized view.
 			for _, tab := range customerTablets {
 				waitForRowCountInTablet(t, tab, keyspace, workflow, 8)
+				// Confirm that we updated the stats on the target tablets as expected.
+				confirmVReplicationThrottling(t, tab, sourceKs, workflow, targetThrottlerAppName)
 			}
 		})
 		t.Run("unthrottle-app-customer", func(t *testing.T) {
@@ -1783,4 +1789,53 @@ func waitForInnoDBHistoryLength(t *testing.T, tablet *cluster.VttabletProcess, e
 
 func releaseInnoDBRowHistory(t *testing.T, dbConn *mysql.Conn) {
 	execQuery(t, dbConn, "rollback")
+}
+
+// confirmVReplicationThrottling confirms that the throttling related metrics reflect that
+// the workflow is being throttled as expected, via the expected app name, and that this
+// is impacting the lag as expected.
+// The tablet passed should be a target tablet for the given workflow while the keyspace
+// name provided should be the source keyspace as the target tablet stats note the stream's
+// source keyspace and shard.
+func confirmVReplicationThrottling(t *testing.T, tab *cluster.VttabletProcess, keyspace, workflow string, appname throttlerapp.Name) {
+	const (
+		sleepTime = 5 * time.Second
+		zv        = int64(0)
+	)
+	time.Sleep(sleepTime) // To be sure that we accrue some lag
+
+	jsVal, err := getDebugVar(t, tab.Port, []string{"VReplicationThrottledCounts"})
+	require.NoError(t, err)
+	require.NotEqual(t, "{}", jsVal)
+	// The JSON value looks like this: {"cproduct.4.tablet.vstreamer": 2, "cproduct.4.tablet.vplayer": 4}
+	throttledCount := gjson.Get(jsVal, fmt.Sprintf(`%s\.*\.tablet\.%s`, workflow, appname)).Int()
+	require.Greater(t, throttledCount, zv, "JSON value: %s", jsVal)
+
+	val, err := getDebugVar(t, tab.Port, []string{"VReplicationThrottledCountTotal"})
+	require.NoError(t, err)
+	require.NotEqual(t, "", val)
+	throttledCountTotal, err := strconv.ParseInt(val, 10, 64)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, throttledCountTotal, throttledCount, "Value: %s", val)
+
+	// We do not calculate replication lag for the vcopier as it's not replicating
+	// events.
+	if appname != throttlerapp.VCopierName {
+		jsVal, err = getDebugVar(t, tab.Port, []string{"VReplicationLagSeconds"})
+		require.NoError(t, err)
+		require.NotEqual(t, "{}", jsVal)
+		// The JSON value looks like this: {"product.0.cproduct.4": 6}
+		vreplLagSeconds := gjson.Get(jsVal, fmt.Sprintf(`%s\.*\.%s\.*`, keyspace, workflow)).Int()
+		require.NoError(t, err)
+		// Take off 1 second to deal with timing issues in the test.
+		minLagSecs := int64(int64(sleepTime.Seconds()) - 1)
+		require.GreaterOrEqual(t, vreplLagSeconds, minLagSecs, "JSON value: %s", jsVal)
+
+		val, err = getDebugVar(t, tab.Port, []string{"VReplicationLagSecondsMax"})
+		require.NoError(t, err)
+		require.NotEqual(t, "", val)
+		vreplLagSecondsMax, err := strconv.ParseInt(val, 10, 64)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, vreplLagSecondsMax, vreplLagSeconds, "Value: %s", val)
+	}
 }

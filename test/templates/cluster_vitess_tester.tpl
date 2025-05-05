@@ -14,7 +14,7 @@ env:
 jobs:
   build:
     name: Run endtoend tests on {{.Name}}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Skip CI
@@ -110,7 +110,7 @@ jobs:
 
         # install JUnit report formatter
         go install github.com/vitessio/go-junit-report@HEAD
-        
+
         # install vitess tester
         go install github.com/vitessio/vt/go/vt@e43009309f599378504905d4b804460f47822ac5
 
@@ -139,12 +139,12 @@ jobs:
         set -exo pipefail
 
         i=1
-        for dir in {{.Path}}/*/; do 
+        for dir in {{.Path}}/*/; do
           # We go over all the directories in the given path.
           # If there is a vschema file there, we use it, otherwise we let vt tester autogenerate it.
           if [ -f $dir/vschema.json ]; then
             vt tester --xunit --vschema "$dir"vschema.json $dir/*.test
-          else 
+          else
             vt tester --sharded --xunit $dir/*.test
           fi
           # Number the reports by changing their file names.

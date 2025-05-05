@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/hex"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,6 +55,67 @@ func TestSrvKeyspaceWithNilNewKeyspace(t *testing.T) {
 	require.True(t, kss.onSrvKeyspace(nil, nil))
 }
 
+// TestKeyspaceEventConcurrency confirms that the keyspace event watcher
+// does not fail to broadcast received keyspace events to subscribers.
+// This verifies that no events are lost when there's a high number of
+// concurrent keyspace events.
+func TestKeyspaceEventConcurrency(t *testing.T) {
+	cell := "cell1"
+	factory := faketopo.NewFakeTopoFactory()
+	factory.AddCell(cell)
+	sts := &fakeTopoServer{}
+	hc := NewFakeHealthCheck(make(chan *TabletHealth))
+	defer hc.Close()
+	kew := &KeyspaceEventWatcher{
+		hc:        hc,
+		ts:        sts,
+		localCell: cell,
+		keyspaces: make(map[string]*keyspaceState),
+		subs:      make(map[chan *KeyspaceEvent]struct{}),
+	}
+
+	// Subscribe to the watcher's broadcasted keyspace events.
+	receiver := kew.Subscribe()
+
+	updates := atomic.Uint32{}
+	updates.Store(0)
+	wg := sync.WaitGroup{}
+	concurrency := 100
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-receiver:
+				updates.Add(1)
+			}
+		}
+	}()
+	// Start up concurent go-routines that will broadcast keyspace events.
+	for i := 1; i <= concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			kew.broadcast(&KeyspaceEvent{})
+		}()
+	}
+	wg.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			require.Equal(t, concurrency, int(updates.Load()), "expected %d updates, got %d", concurrency, updates.Load())
+			return
+		default:
+			if int(updates.Load()) == concurrency { // Pass
+				cancel()
+				return
+			}
+		}
+	}
+}
+
 // TestKeyspaceEventTypes confirms that the keyspace event watcher determines
 // that the unavailability event is caused by the correct scenario. We should
 // consider it to be caused by a resharding operation when the following
@@ -86,11 +148,11 @@ func TestKeyspaceEventTypes(t *testing.T) {
 	kew := NewKeyspaceEventWatcher(ctx, ts2, hc, cell)
 
 	type testCase struct {
-		name                    string
-		kss                     *keyspaceState
-		shardToCheck            string
-		expectResharding        bool
-		expectPrimaryNotServing bool
+		name               string
+		kss                *keyspaceState
+		shardToCheck       string
+		expectResharding   bool
+		expectShouldBuffer bool
 	}
 
 	testCases := []testCase{
@@ -127,9 +189,9 @@ func TestKeyspaceEventTypes(t *testing.T) {
 				},
 				consistent: false,
 			},
-			shardToCheck:            "-",
-			expectResharding:        true,
-			expectPrimaryNotServing: false,
+			shardToCheck:       "-",
+			expectResharding:   true,
+			expectShouldBuffer: false,
 		},
 		{
 			name: "two to four resharding in progress",
@@ -188,9 +250,9 @@ func TestKeyspaceEventTypes(t *testing.T) {
 				},
 				consistent: false,
 			},
-			shardToCheck:            "-80",
-			expectResharding:        true,
-			expectPrimaryNotServing: false,
+			shardToCheck:       "-80",
+			expectResharding:   true,
+			expectShouldBuffer: false,
 		},
 		{
 			name: "unsharded primary not serving",
@@ -214,9 +276,9 @@ func TestKeyspaceEventTypes(t *testing.T) {
 				},
 				consistent: false,
 			},
-			shardToCheck:            "-",
-			expectResharding:        false,
-			expectPrimaryNotServing: true,
+			shardToCheck:       "-",
+			expectResharding:   false,
+			expectShouldBuffer: true,
 		},
 		{
 			name: "sharded primary not serving",
@@ -248,9 +310,9 @@ func TestKeyspaceEventTypes(t *testing.T) {
 				},
 				consistent: false,
 			},
-			shardToCheck:            "-80",
-			expectResharding:        false,
-			expectPrimaryNotServing: true,
+			shardToCheck:       "-80",
+			expectResharding:   false,
+			expectShouldBuffer: true,
 		},
 	}
 
@@ -265,8 +327,89 @@ func TestKeyspaceEventTypes(t *testing.T) {
 			resharding := kew.TargetIsBeingResharded(ctx, tc.kss.shards[tc.shardToCheck].target)
 			require.Equal(t, resharding, tc.expectResharding, "TargetIsBeingResharded should return %t", tc.expectResharding)
 
-			_, primaryDown := kew.PrimaryIsNotServing(ctx, tc.kss.shards[tc.shardToCheck].target)
-			require.Equal(t, primaryDown, tc.expectPrimaryNotServing, "PrimaryIsNotServing should return %t", tc.expectPrimaryNotServing)
+			_, shouldBuffer := kew.ShouldStartBufferingForTarget(ctx, tc.kss.shards[tc.shardToCheck].target)
+			require.Equal(t, shouldBuffer, tc.expectShouldBuffer, "ShouldStartBufferingForTarget should return %t", tc.expectShouldBuffer)
+		})
+	}
+}
+
+// TestWaitForConsistentKeyspaces tests the behaviour of WaitForConsistent for different scenarios.
+func TestWaitForConsistentKeyspaces(t *testing.T) {
+	testcases := []struct {
+		name        string
+		ksMap       map[string]*keyspaceState
+		ksList      []string
+		errExpected string
+	}{
+		{
+			name:   "Empty keyspace list",
+			ksList: nil,
+			ksMap: map[string]*keyspaceState{
+				"ks1": {},
+			},
+			errExpected: "",
+		},
+		{
+			name:   "All keyspaces consistent",
+			ksList: []string{"ks1", "ks2"},
+			ksMap: map[string]*keyspaceState{
+				"ks1": {
+					consistent: true,
+				},
+				"ks2": {
+					consistent: true,
+				},
+			},
+			errExpected: "",
+		},
+		{
+			name:   "One keyspace inconsistent",
+			ksList: []string{"ks1", "ks2"},
+			ksMap: map[string]*keyspaceState{
+				"ks1": {
+					consistent: true,
+				},
+				"ks2": {
+					consistent: false,
+				},
+			},
+			errExpected: "context canceled",
+		},
+		{
+			name:   "One deleted keyspace - consistent",
+			ksList: []string{"ks1", "ks2"},
+			ksMap: map[string]*keyspaceState{
+				"ks1": {
+					consistent: true,
+				},
+				"ks2": {
+					deleted: true,
+				},
+			},
+			errExpected: "",
+		},
+	}
+
+	for _, tt := range testcases {
+		t.Run(tt.name, func(t *testing.T) {
+			// We create a cancelable context and immediately cancel it.
+			// We don't want the unit tests to wait, so we only test the first
+			// iteration of whether the keyspace event watcher returns
+			// that the keyspaces are consistent or not.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			kew := KeyspaceEventWatcher{
+				keyspaces: tt.ksMap,
+				mu:        sync.Mutex{},
+				ts:        &fakeTopoServer{},
+			}
+			err := kew.WaitForConsistentKeyspaces(ctx, tt.ksList)
+			if tt.errExpected != "" {
+				require.ErrorContains(t, err, tt.errExpected)
+			} else {
+				require.NoError(t, err)
+			}
+
 		})
 	}
 }
@@ -531,6 +674,26 @@ func (f *fakeTopoServer) GetSrvKeyspace(ctx context.Context, cell, keyspace stri
 	return ks, nil
 }
 
+// GetSrvVSchema returns the SrvVSchema for a cell.
+func (f *fakeTopoServer) GetSrvVSchema(ctx context.Context, cell string) (*vschemapb.SrvVSchema, error) {
+	vs := &vschemapb.SrvVSchema{
+		Keyspaces: map[string]*vschemapb.Keyspace{
+			"ks1": {
+				Sharded: true,
+			},
+		},
+		RoutingRules: &vschemapb.RoutingRules{
+			Rules: []*vschemapb.RoutingRule{
+				{
+					FromTable: "db1.t1",
+					ToTables:  []string{"db1.t1"},
+				},
+			},
+		},
+	}
+	return vs, nil
+}
+
 func (f *fakeTopoServer) WatchSrvKeyspace(ctx context.Context, cell, keyspace string, callback func(*topodatapb.SrvKeyspace, error) bool) {
 	ks, err := f.GetSrvKeyspace(ctx, cell, keyspace)
 	callback(ks, err)
@@ -540,5 +703,6 @@ func (f *fakeTopoServer) WatchSrvKeyspace(ctx context.Context, cell, keyspace st
 // the provided cell.  It will call the callback when
 // a new value or an error occurs.
 func (f *fakeTopoServer) WatchSrvVSchema(ctx context.Context, cell string, callback func(*vschemapb.SrvVSchema, error) bool) {
-
+	sv, err := f.GetSrvVSchema(ctx, cell)
+	callback(sv, err)
 }

@@ -14,7 +14,7 @@ env:
 jobs:
   test:
     name: {{.Name}}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Skip CI
@@ -145,7 +145,7 @@ jobs:
 
         go mod download
         go install golang.org/x/tools/cmd/goimports@latest
-        
+
         # install JUnit report formatter
         go install github.com/vitessio/go-junit-report@HEAD
 
