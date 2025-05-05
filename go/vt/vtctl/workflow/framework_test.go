@@ -56,6 +56,12 @@ const (
 	tabletUIDStep           = 10
 )
 
+var defaultTabletTypes = []topodatapb.TabletType{
+	topodatapb.TabletType_PRIMARY,
+	topodatapb.TabletType_REPLICA,
+	topodatapb.TabletType_RDONLY,
+}
+
 type testKeyspace struct {
 	KeyspaceName string
 	ShardNames   []string
@@ -195,6 +201,40 @@ func (env *testEnv) addTablet(t *testing.T, ctx context.Context, id int, keyspac
 	return tablet
 }
 
+func (env *testEnv) saveRoutingRules(t *testing.T, rules map[string][]string) {
+	err := topotools.SaveRoutingRules(context.Background(), env.ts, rules)
+	require.NoError(t, err)
+	err = env.ts.RebuildSrvVSchema(context.Background(), nil)
+	require.NoError(t, err)
+}
+
+func (env *testEnv) updateTableRoutingRules(t *testing.T, ctx context.Context,
+	tabletTypes []topodatapb.TabletType, tables []string, sourceKeyspace, targetKeyspace, toKeyspace string) {
+
+	if len(tabletTypes) == 0 {
+		tabletTypes = defaultTabletTypes
+	}
+	rr, err := env.ts.GetRoutingRules(ctx)
+	require.NoError(t, err)
+	rules := topotools.GetRoutingRulesMap(rr)
+	for _, tabletType := range tabletTypes {
+		for _, tableName := range tables {
+			toTarget := []string{toKeyspace + "." + tableName}
+			tt := strings.ToLower(tabletType.String())
+			if tabletType == topodatapb.TabletType_PRIMARY {
+				rules[tableName] = toTarget
+				rules[targetKeyspace+"."+tableName] = toTarget
+				rules[sourceKeyspace+"."+tableName] = toTarget
+			} else {
+				rules[tableName+"@"+tt] = toTarget
+				rules[targetKeyspace+"."+tableName+"@"+tt] = toTarget
+				rules[sourceKeyspace+"."+tableName+"@"+tt] = toTarget
+			}
+		}
+	}
+	env.saveRoutingRules(t, rules)
+}
+
 // addTableRoutingRules adds routing rules from the test env's source keyspace to
 // its target keyspace for the given tablet types and tables.
 func (env *testEnv) addTableRoutingRules(t *testing.T, ctx context.Context, tabletTypes []topodatapb.TabletType, tables []string) {
@@ -234,6 +274,7 @@ type testTMClient struct {
 	vrQueries                          map[int][]*queryResult
 	createVReplicationWorkflowRequests map[uint32]*tabletmanagerdatapb.CreateVReplicationWorkflowRequest
 	readVReplicationWorkflowRequests   map[uint32]*tabletmanagerdatapb.ReadVReplicationWorkflowRequest
+	refreshStateErrors                 map[uint32]error
 
 	env     *testEnv    // For access to the env config from tmc methods.
 	reverse atomic.Bool // Are we reversing traffic?
@@ -445,4 +486,14 @@ func (tmc *testTMClient) WaitForPosition(ctx context.Context, tablet *topodatapb
 
 func (tmc *testTMClient) VReplicationWaitForPos(ctx context.Context, tablet *topodatapb.Tablet, id int32, pos string) error {
 	return nil
+}
+
+func (tmc *testTMClient) SetRefreshStateError(tablet *topodatapb.Tablet, err error) {
+	tmc.mu.Lock()
+	defer tmc.mu.Unlock()
+
+	if tmc.refreshStateErrors == nil {
+		tmc.refreshStateErrors = make(map[uint32]error)
+	}
+	tmc.refreshStateErrors[tablet.Alias.Uid] = err
 }
