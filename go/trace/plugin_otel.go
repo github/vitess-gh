@@ -29,6 +29,9 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
+
+	"go.opentelemetry.io/contrib/propagators/jaeger"
+
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 )
@@ -69,10 +72,7 @@ func newOtelTracer(serviceName string) (tracingService, io.Closer, error) {
 
 	// Set the global trace provider and propagator
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(jaeger.Jaeger{}))
 
 	// Create OpenTelemetry tracer
 	otelTracer := otel.Tracer(serviceName)
