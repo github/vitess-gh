@@ -13,6 +13,7 @@ create table t1_id2_idx(
 create table t2(
                    id3 bigint,
                    id4 bigint,
+                   e ENUM('a','b','c') DEFAULT 'a',
                    primary key(id3)
 ) Engine=InnoDB;
 

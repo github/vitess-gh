@@ -130,6 +130,7 @@ func TestUnion(t *testing.T) {
 	mcmp, closer := start(t)
 	defer closer()
 	mcmp.Exec("insert into t1(id1, id2) values(1, 1), (2, 2)")
+	mcmp.Exec("insert into t2(id3, id4, e) values(1,1,'a'), (2,2,'b'), (3,1,'a'), (4,2,'b')")
 
 	mcmp.AssertMatches(`SELECT 1 UNION SELECT 1 UNION SELECT 1`, `[[INT64(1)]]`)
 	mcmp.AssertMatches(`SELECT 1,'a' UNION SELECT 1,'a' UNION SELECT 1,'a' ORDER BY 1`, `[[INT64(1) VARCHAR("a")]]`)
@@ -140,5 +141,6 @@ func TestUnion(t *testing.T) {
 	mcmp.AssertMatches(`(SELECT 1,'a' order by 1) union (SELECT 1,'a' ORDER BY 1)`, `[[INT64(1) VARCHAR("a")]]`)
 	if utils.BinaryIsAtLeastAtVersion(19, "vtgate") {
 		mcmp.AssertMatches(`(SELECT id2,'a' from t1 where id1 = 1) union (SELECT 'a',id2 from t1 where id1 = 2)`, `[[VARCHAR("1") VARCHAR("a")] [VARCHAR("a") VARCHAR("2")]]`)
+		mcmp.AssertMatches(`(SELECT id3, e from t2 where e = 'a' and id4 = 1) union (SELECT e, id3 from t2 where e='b' and id4 = 2)`, `[[VARCHAR("1") VARCHAR("a")] [VARCHAR("a") VARCHAR("2")]]`)
 	}
 }
