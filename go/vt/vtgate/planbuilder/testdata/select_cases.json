@@ -921,7 +921,7 @@
               "Sharded": true
             },
             "FieldQuery": "select id from `user` where 1 != 1",
-            "Query": "select /* comment */ id from `user` where id > 1 and id < 10",
+            "Query": "select id from `user` where id > 1 and id < 10",
             "Table": "`user`"
           },
           {
