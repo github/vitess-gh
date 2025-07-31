@@ -87,7 +87,9 @@ func (cp *ConnectionPool) Open(info dbconfigs.Connector) {
 	}
 
 	cp.ConnPool.Open(connect, refresh)
-	cp.statsExporter.SetPool(cp.ConnPool)
+	if cp.statsExporter != nil {
+		cp.statsExporter.SetPool(cp.ConnPool)
+	}
 }
 
 func (cp *ConnectionPool) Close() {
