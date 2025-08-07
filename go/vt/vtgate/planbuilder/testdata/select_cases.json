@@ -891,7 +891,7 @@
         },
         "FieldQuery": "select `user`.col from `user` where 1 != 1",
         "Query": "select /* comment */ `user`.col from `user` where id in (select id from `user` where id > 1 and id < 10)",
-		  "Table": "`user`"
+		  	"Table": "`user`"
       },
       "TablesUsed": [
         "user.user"
@@ -922,7 +922,7 @@
             },
             "FieldQuery": "select id from `user` where 1 != 1",
             "Query": "select /* comment */ id from `user` where id > 1 and id < 10",
-			  "Table": "`user`"
+				"Table": "`user`"
           },
           {
             "InputName": "Outer",
@@ -934,7 +934,7 @@
             },
             "FieldQuery": "select `user`.col from `user` where 1 != 1",
             "Query": "select /* comment */ `user`.col from `user` where :__sq_has_values and foo in ::__sq1",
-			  "Table": "`user`"
+				"Table": "`user`"
           }
         ]
       },
