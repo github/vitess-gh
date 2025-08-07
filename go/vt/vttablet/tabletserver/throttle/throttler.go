@@ -368,7 +368,7 @@ func (throttler *Throttler) WatchSrvKeyspaceCallback(srvks *topodatapb.SrvKeyspa
 		if !topo.IsErrType(err, topo.Interrupted) && !errors.Is(err, context.Canceled) {
 			log.Errorf("WatchSrvKeyspaceCallback error: %v", err)
 		}
-		return false
+		return true
 	}
 	throttlerConfig := throttler.normalizeThrottlerConfig(srvks.ThrottlerConfig)
 
@@ -859,7 +859,7 @@ func (throttler *Throttler) generateTabletProbeFunction(ctx context.Context, clu
 		req := &tabletmanagerdatapb.CheckThrottlerRequest{} // We leave AppName empty; it will default to VitessName anyway, and we can save some proto space
 		resp, gRPCErr := tmClient.CheckThrottler(ctx, probe.Tablet, req)
 		if gRPCErr != nil {
-			mySQLThrottleMetric.Err = fmt.Errorf("gRPC error accessing tablet %v. Err=%v", probe.Alias, gRPCErr)
+			mySQLThrottleMetric.Err = fmt.Errorf("gRPC error accessing tablet %v. Err=%w", probe.Alias, gRPCErr)
 			return mySQLThrottleMetric
 		}
 		mySQLThrottleMetric.Value = resp.Value
