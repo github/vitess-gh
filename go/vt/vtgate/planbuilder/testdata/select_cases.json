@@ -953,8 +953,7 @@
       "TablesUsed": [
         "user.user"
       ]
-    },
-    "skip_e2e": true
+    }
   },
   {
     "comment": "Comments with subquery not merged into a single route",
@@ -998,8 +997,7 @@
       "TablesUsed": [
         "user.user"
       ]
-    },
-    "skip_e2e": true
+    }
   },
   {
     "comment": "for update",
