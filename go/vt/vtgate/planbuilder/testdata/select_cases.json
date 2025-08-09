@@ -989,7 +989,6 @@
     "comment": "Comments with subquery",
     "query": "select /* comment */ user.col from user where id IN (select id from user where id > 1 and id < 10)",
     "plan": {
-      "Type": "Scatter",
       "QueryType": "SELECT",
       "Original": "select /* comment */ user.col from user where id IN (select id from user where id > 1 and id < 10)",
       "Instructions": {
@@ -1000,7 +999,8 @@
           "Sharded": true
         },
         "FieldQuery": "select `user`.col from `user` where 1 != 1",
-        "Query": "select /* comment */ `user`.col from `user` where id in (select id from `user` where id > 1 and id < 10)"
+        "Query": "select /* comment */ `user`.col from `user` where id in (select id from `user` where id > 1 and id < 10)",
+        "Table": "`user`"
       },
       "TablesUsed": [
         "user.user"
@@ -1012,7 +1012,6 @@
     "comment": "Comments with subquery not merged into a single route",
     "query": "select /* comment */ user.col from user where foo IN (select id from user where id > 1 and id < 10)",
     "plan": {
-      "Type": "Complex",
       "QueryType": "SELECT",
       "Original": "select /* comment */ user.col from user where foo IN (select id from user where id > 1 and id < 10)",
       "Instructions": {
@@ -1032,7 +1031,8 @@
               "Sharded": true
             },
             "FieldQuery": "select id from `user` where 1 != 1",
-            "Query": "select /* comment */ id from `user` where id > 1 and id < 10"
+            "Query": "select /* comment */ id from `user` where id > 1 and id < 10",
+            "Table": "`user`"
           },
           {
             "InputName": "Outer",
@@ -1043,7 +1043,8 @@
               "Sharded": true
             },
             "FieldQuery": "select `user`.col from `user` where 1 != 1",
-            "Query": "select /* comment */ `user`.col from `user` where :__sq_has_values and foo in ::__sq1"
+            "Query": "select /* comment */ `user`.col from `user` where :__sq_has_values and foo in ::__sq1",
+            "Table": "`user`"
           }
         ]
       },
