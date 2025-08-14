@@ -94,8 +94,10 @@ func (m *Metrics) ResetSettingCount() int64 {
 	return m.resetSetting.Load()
 }
 
-type Connector[C Connection] func(ctx context.Context) (C, error)
-type RefreshCheck func() (bool, error)
+type (
+	Connector[C Connection] func(ctx context.Context) (C, error)
+	RefreshCheck            func() (bool, error)
+)
 
 type Config[C Connection] struct {
 	Capacity        int64
@@ -302,10 +304,6 @@ func (pool *ConnPool[C]) CloseWithContext(ctx context.Context) error {
 		return nil
 	}
 
-	// update the idle count to match the new capacity if necessary
-	// wait for connections to be returned to the pool if we're reducing the capacity.
-	defer pool.setIdleCount()
-
 	// Close idle connections currently in the stack
 	for {
 		// make sure there's no clients waiting for connections because they won't be returned in the future
@@ -314,7 +312,7 @@ func (pool *ConnPool[C]) CloseWithContext(ctx context.Context) error {
 		// try closing from connections which are currently idle in the stacks
 		conn := pool.getFromSettingsStack(nil)
 		if conn == nil {
-			conn = pool.pop(&pool.clean)
+			conn, _ = pool.clean.Pop()
 		}
 		if conn == nil {
 			break
@@ -473,7 +471,7 @@ func (pool *ConnPool[C]) tryReturnConn(conn *Pooled[C]) bool {
 
 		// Close connection if pool is closed
 		if pool.IsClosed() {
-			conn = pool.pop(&pool.clean)
+			conn, _ = pool.clean.Pop()
 			conn.Close()
 			pool.closedConn()
 		}
@@ -484,7 +482,7 @@ func (pool *ConnPool[C]) tryReturnConn(conn *Pooled[C]) bool {
 
 		// Close connection if pool is closed
 		if pool.IsClosed() {
-			conn = pool.pop(&pool.settings[stack])
+			conn, _ = pool.settings[stack].Pop()
 			conn.Close()
 			pool.closedConn()
 		}
