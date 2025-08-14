@@ -71,6 +71,7 @@ func usage() {
 
 func main() {
 	usage()
+	defer log.Flush()
 	ctx := context.Background()
 	config := parseCommandLine()
 	if !config.Validate() {

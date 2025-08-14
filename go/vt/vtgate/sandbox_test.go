@@ -281,10 +281,7 @@ func (sct *sandboxTopo) WatchSrvVSchema(ctx context.Context, cell string, callba
 	}
 
 	sct.topoServer.UpdateSrvVSchema(ctx, cell, srvVSchema)
-	current, updateChan, err := sct.topoServer.WatchSrvVSchema(ctx, cell)
-	if err != nil {
-		panic(fmt.Sprintf("sandboxTopo WatchSrvVSchema returned an error: %v", err))
-	}
+	current, updateChan, _ := sct.topoServer.WatchSrvVSchema(ctx, cell)
 	if !callback(current.Value, nil) {
 		panic("sandboxTopo callback returned false")
 	}
