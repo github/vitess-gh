@@ -93,8 +93,10 @@ func (m *Metrics) ResetSettingCount() int64 {
 	return m.resetSetting.Load()
 }
 
-type Connector[C Connection] func(ctx context.Context) (C, error)
-type RefreshCheck func() (bool, error)
+type (
+	Connector[C Connection] func(ctx context.Context) (C, error)
+	RefreshCheck            func() (bool, error)
+)
 
 type Config[C Connection] struct {
 	Capacity        int64
@@ -299,10 +301,6 @@ func (pool *ConnPool[C]) CloseWithContext(ctx context.Context) error {
 	if oldcap == newcap {
 		return nil
 	}
-
-	// update the idle count to match the new capacity if necessary
-	// wait for connections to be returned to the pool if we're reducing the capacity.
-	defer pool.setIdleCount()
 
 	// Close idle connections currently in the stack
 	for {

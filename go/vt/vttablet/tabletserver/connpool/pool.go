@@ -215,11 +215,6 @@ func (cp *Pool) InUse() int64 {
 	return pool.InUse()
 }
 
-func (cp *Pool) IdleCount() int64 {
-	pool := cp.ConnPool.Load()
-	return pool.IdleCount()
-}
-
 func (cp *Pool) IdleTimeout() time.Duration {
 	pool := cp.ConnPool.Load()
 	return pool.IdleTimeout()
