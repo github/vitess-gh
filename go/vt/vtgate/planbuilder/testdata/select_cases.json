@@ -989,6 +989,7 @@
     "comment": "Comments with subquery",
     "query": "select /* comment */ user.col from user where id IN (select id from user where id > 1 and id < 10)",
     "plan": {
+      "Type": "Scatter",
       "QueryType": "SELECT",
       "Original": "select /* comment */ user.col from user where id IN (select id from user where id > 1 and id < 10)",
       "Instructions": {
@@ -1012,6 +1013,7 @@
     "comment": "Comments with subquery not merged into a single route",
     "query": "select /* comment */ user.col from user where foo IN (select id from user where id > 1 and id < 10)",
     "plan": {
+      "Type": "Complex",
       "QueryType": "SELECT",
       "Original": "select /* comment */ user.col from user where foo IN (select id from user where id > 1 and id < 10)",
       "Instructions": {
