@@ -17,7 +17,7 @@ jobs:
   build:
     timeout-minutes: 60
     name: Run endtoend tests on Cluster (vreplication_migrate)
-    runs-on: gh-hosted-runners-16cores-1-24.04
+    runs-on: ubuntu-latest-xl
 
     steps:
     - name: Skip CI
