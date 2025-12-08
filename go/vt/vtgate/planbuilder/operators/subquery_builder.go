@@ -169,7 +169,49 @@ func createSubquery(
 	sqc := &SubQueryBuilder{totalID: totalID, subqID: subqID, outerID: outerID}
 
 	predicates, joinCols := sqc.inspectStatement(ctx, subq.Select)
-	correlated := !ctx.SemTable.RecursiveDeps(subq).IsEmpty()
+
+	subqDependencies := ctx.SemTable.RecursiveDeps(subq)
+	correlated := subqDependencies.KeepOnly(outerID).NotEmpty()
+
+	opInner := translateQueryToOp(ctx, subq.Select)
+
+	opInner = sqc.getRootOperator(opInner, nil)
+	return &SubQuery{
+		FilterType:       filterType,
+		Subquery:         opInner,
+		Predicates:       predicates,
+		Original:         original,
+		ArgName:          argName,
+		originalSubquery: originalSq,
+		IsArgument:       isArg,
+		TopLevel:         topLevel,
+		JoinColumns:      joinCols,
+		correlated:       correlated,
+	}
+}
+
+func createSubqueryFromPath(
+	ctx *plancontext.PlanningContext,
+	original sqlparser.Expr,
+	subq *sqlparser.Subquery,
+	path sqlparser.ASTPath,
+	outerID semantics.TableSet,
+	parent sqlparser.Expr,
+	argName string,
+	filterType opcode.PulloutOpcode,
+	isArg bool,
+) *SubQuery {
+	topLevel := ctx.SemTable.EqualsExpr(original, parent)
+	original = cloneASTAndSemState(ctx, original)
+	originalSq := sqlparser.GetNodeFromPath(original, path).(*sqlparser.Subquery)
+	subqID := findTablesContained(ctx, originalSq.Select)
+	totalID := subqID.Merge(outerID)
+	sqc := &SubQueryBuilder{totalID: totalID, subqID: subqID, outerID: outerID}
+
+	predicates, joinCols := sqc.inspectStatement(ctx, subq.Select)
+
+	subqDependencies := ctx.SemTable.RecursiveDeps(subq)
+	correlated := subqDependencies.KeepOnly(outerID).NotEmpty()
 
 	opInner := translateQueryToOp(ctx, subq.Select)
 
