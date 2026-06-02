@@ -1735,7 +1735,7 @@ var (
 		input: "alter table a drop check ch_1",
 	}, {
 		input:  "alter table a drop constraint ch_1",
-		output: "alter table a drop check ch_1",
+		output: "alter table a drop constraint ch_1",
 	}, {
 		input: "alter table a drop foreign key kx",
 	}, {
@@ -6337,6 +6337,12 @@ var (
 	}, {
 		input:  "insert into t1 (a1) values row('a'), ('b')",
 		output: "syntax error at position 39",
+	}, {
+		input:  "select a, * from t",
+		output: "syntax error at position 12",
+	}, {
+		input:  "select *, * from t",
+		output: "syntax error at position 12",
 	}}
 )
 

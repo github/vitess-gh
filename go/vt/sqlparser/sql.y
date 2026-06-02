@@ -1235,13 +1235,21 @@ values_statement:
   }
 
 stream_statement:
-  STREAM comment_opt select_expression FROM table_name
+  STREAM comment_opt '*' FROM table_name
+  {
+    $$ = &Stream{Comments: Comments($2).Parsed(), SelectExpr: &StarExpr{}, Table: $5}
+  }
+| STREAM comment_opt select_expression FROM table_name
   {
     $$ = &Stream{Comments: Comments($2).Parsed(), SelectExpr: $3, Table: $5}
   }
 
 vstream_statement:
-  VSTREAM comment_opt select_expression FROM table_name where_expression_opt limit_opt
+  VSTREAM comment_opt '*' FROM table_name where_expression_opt limit_opt
+  {
+    $$ = &VStream{Comments: Comments($2).Parsed(), SelectExpr: &StarExpr{}, Table: $5, Where: NewWhere(WhereClause, $6), Limit: $7}
+  }
+| VSTREAM comment_opt select_expression FROM table_name where_expression_opt limit_opt
   {
     $$ = &VStream{Comments: Comments($2).Parsed(), SelectExpr: $3, Table: $5, Where: NewWhere(WhereClause, $6), Limit: $7}
   }
@@ -3475,7 +3483,7 @@ alter_option:
   }
 | DROP CONSTRAINT sql_id
   {
-    $$ = &DropKey{Type:CheckKeyType, Name:$3}
+    $$ = &DropKey{Type:ConstraintType, Name:$3}
   }
 | FORCE
   {
@@ -5288,7 +5296,11 @@ select_option:
   }
 
 select_expression_list:
-  select_expression
+  '*'
+  {
+    $$ = &SelectExprs{Exprs: []SelectExpr{&StarExpr{}}}
+  }
+| select_expression
   {
     $$ = &SelectExprs{Exprs: []SelectExpr{$1}}
   }
@@ -5300,11 +5312,7 @@ select_expression_list:
   }
 
 select_expression:
-  '*'
-  {
-    $$ = &StarExpr{}
-  }
-| expression as_ci_opt
+  expression as_ci_opt
   {
     $$ = &AliasedExpr{Expr: $1, As: $2}
   }

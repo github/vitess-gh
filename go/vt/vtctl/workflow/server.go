@@ -535,6 +535,17 @@ func (s *Server) getWorkflowState(ctx context.Context, targetKeyspace, workflowN
 	return ts, state, nil
 }
 
+func validateMoveTablesSourceKeyspace(ts *trafficSwitcher) error {
+	if ts.workflowType == binlogdatapb.VReplicationWorkflowType_MoveTables &&
+		ts.externalCluster == "" &&
+		ts.sourceKeyspace == ts.targetKeyspace {
+		return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+			"workflow %s.%s is invalid: MoveTables source keyspace matches target keyspace (%s)",
+			ts.targetKeyspace, ts.workflow, ts.targetKeyspace)
+	}
+	return nil
+}
+
 // LookupVindexComplete checks if the lookup vindex has been externalized,
 // and if the vindex has an owner, it deletes the workflow.
 func (s *Server) LookupVindexComplete(ctx context.Context, req *vtctldatapb.LookupVindexCompleteRequest) (*vtctldatapb.LookupVindexCompleteResponse, error) {
@@ -897,9 +908,7 @@ func (s *Server) moveTablesCreate(ctx context.Context, req *vtctldatapb.MoveTabl
 		s.Logger().Infof("Successfully opened external topo: %+v", externalTopo)
 	}
 
-	origVSchema := &topo.KeyspaceVSchemaInfo{ // If we need to rollback a failed create
-		Name: targetKeyspace,
-	}
+	var origVSchema *topo.KeyspaceVSchemaInfo // If we need to rollback a failed create
 	vschema, err := s.ts.GetVSchema(ctx, targetKeyspace)
 	if err != nil {
 		return nil, err
@@ -957,9 +966,11 @@ func (s *Server) moveTablesCreate(ctx context.Context, req *vtctldatapb.MoveTabl
 	if !vschema.Sharded {
 		// Save the original in case we need to restore it for a late failure in
 		// the defer(). We do NOT want to clone the version field as we will
-		// intentionally be going back in time. So we only clone the internal
-		// vschemapb.Keyspace field.
-		origVSchema.Keyspace = vschema.Keyspace.CloneVT()
+		// intentionally be going back in time.
+		origVSchema = &topo.KeyspaceVSchemaInfo{
+			Name:     targetKeyspace,
+			Keyspace: vschema.Keyspace.CloneVT(),
+		}
 		if err := s.addTablesToVSchema(ctx, sourceKeyspace, vschema.Keyspace, tables, externalTopo == nil); err != nil {
 			return nil, err
 		}
@@ -1061,7 +1072,8 @@ func (s *Server) moveTablesCreate(ctx context.Context, req *vtctldatapb.MoveTabl
 			if cerr := s.dropArtifacts(ctx, false, &switcher{s: s, ts: ts}); cerr != nil {
 				err = vterrors.Wrapf(err, "failed to cleanup workflow artifacts: %v", cerr)
 			}
-			if origVSchema == nil { // There's no previous version to restore
+			if vschema.Sharded || origVSchema == nil {
+				// We don't modify the vschema for sharded keyspaces, so there's nothing to restore.
 				return
 			}
 			if cerr := s.ts.SaveVSchema(ctx, origVSchema); cerr != nil {
@@ -2546,6 +2558,9 @@ func (s *Server) WorkflowSwitchTraffic(ctx context.Context, req *vtctldatapb.Wor
 	if err != nil {
 		return nil, err
 	}
+	if err := validateMoveTablesSourceKeyspace(ts); err != nil {
+		return nil, err
+	}
 
 	if startState.WorkflowType == TypeMigrate {
 		return nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "invalid action for Migrate workflow: SwitchTraffic")
@@ -2892,9 +2907,14 @@ func (s *Server) switchWrites(ctx context.Context, req *vtctldatapb.WorkflowSwit
 
 	// We need to hold the keyspace locks longer than waitTimeout*X -- where X
 	// is the number of sub-steps where the waitTimeout value is used: stopping
-	// existing streams, waiting for replication to catch up, and initializing
-	// the target sequences -- to be sure the lock is not lost.
-	ksLockTTL := waitTimeout * 3
+	// existing streams, waiting for replication to catch up, initializing the
+	// target sequences, and completing the detached post-journal tail -- to be
+	// sure the lock is not lost.
+	postJournalTimeout := max(waitTimeout, 30*time.Second)
+	ksLockTTL := waitTimeout*3 + postJournalTimeout
+	startPostJournalCtx := func(ctx context.Context) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.WithoutCancel(ctx), postJournalTimeout)
+	}
 
 	// Need to lock both source and target keyspaces.
 	ctx, sourceUnlock, lockErr := sw.lockKeyspace(ctx, ts.SourceKeyspaceName(), "SwitchWrites", topo.WithTTL(ksLockTTL))
@@ -3082,21 +3102,30 @@ func (s *Server) switchWrites(ctx context.Context, req *vtctldatapb.WorkflowSwit
 				return handleError(fmt.Sprintf("failed to initialize the sequences used in the %s keyspace", ts.TargetKeyspaceName()), err)
 			}
 		}
+
+		// This is the point of no return. Once a journal is created,
+		// traffic can be redirected to target shards.
+		if err := confirmKeyspaceLocksHeld(); err != nil {
+			return handleError("locks were lost", err)
+		}
+		postJournalCtx, postJournalCancel := startPostJournalCtx(ctx)
+		defer postJournalCancel()
+		ctx = postJournalCtx
 	} else {
 		if cancel {
 			return handleError("invalid cancel", vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION, "traffic switching has reached the point of no return, cannot cancel"))
 		}
+		postJournalCtx, postJournalCancel := startPostJournalCtx(ctx)
+		defer postJournalCancel()
+		ctx = postJournalCtx
 		ts.Logger().Infof("Journals were found. Completing the left over steps.")
 		// Need to gather positions in case all journals were not created.
 		if err := ts.gatherPositions(ctx); err != nil {
 			return handleError("failed to gather replication positions", err)
 		}
-	}
-
-	// This is the point of no return. Once a journal is created,
-	// traffic can be redirected to target shards.
-	if err := confirmKeyspaceLocksHeld(); err != nil {
-		return handleError("locks were lost", err)
+		if err := confirmKeyspaceLocksHeld(); err != nil {
+			return handleError("locks were lost", err)
+		}
 	}
 	if err := sw.createJournals(ctx, sourceWorkflows); err != nil {
 		return handleError("failed to create the journal", err)

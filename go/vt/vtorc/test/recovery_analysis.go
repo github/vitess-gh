@@ -76,6 +76,7 @@ type InfoForRecoveryAnalysis struct {
 	CountMixedBasedLoggingReplicas            uint
 	CountRowBasedLoggingReplicas              uint
 	CountDistinctMajorVersionsLoggingReplicas uint
+	CountValidSemiSyncReplicatingReplicas     uint
 	CountDelayedReplicas                      uint
 	CountLaggingReplicas                      uint
 	MinReplicaGTIDMode                        string
@@ -106,7 +107,7 @@ func (info *InfoForRecoveryAnalysis) ConvertToRowMap() sqlutils.RowMap {
 	rowMap["count_valid_oracle_gtid_replicas"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.CountValidOracleGTIDReplicas), Valid: true}
 	rowMap["count_valid_replicas"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.CountValidReplicas), Valid: true}
 	rowMap["count_valid_replicating_replicas"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.CountValidReplicatingReplicas), Valid: true}
-	rowMap["data_center"] = sqlutils.CellData{String: info.DataCenter, Valid: true}
+	rowMap["count_valid_semi_sync_replicating_replicas"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.CountValidSemiSyncReplicatingReplicas), Valid: true}
 	rowMap["downtime_end_timestamp"] = sqlutils.CellData{String: info.DowntimeEndTimestamp, Valid: true}
 	rowMap["downtime_remaining_seconds"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.DowntimeRemainingSeconds), Valid: true}
 	rowMap["durability_policy"] = sqlutils.CellData{String: info.DurabilityPolicy, Valid: true}
@@ -137,7 +138,13 @@ func (info *InfoForRecoveryAnalysis) ConvertToRowMap() sqlutils.RowMap {
 		res, _ := prototext.Marshal(info.PrimaryTabletInfo)
 		rowMap["primary_tablet_info"] = sqlutils.CellData{String: string(res), Valid: true}
 	}
-	rowMap["primary_timestamp"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.PrimaryTimestamp), Valid: true}
+
+	primaryTimestamp := fmt.Sprintf("%v", info.PrimaryTimestamp)
+	if info.PrimaryTimestamp != nil {
+		primaryTimestamp = info.PrimaryTimestamp.UTC().Format(sqlutils.DateTimeFormat)
+	}
+	rowMap["primary_timestamp"] = sqlutils.CellData{String: primaryTimestamp, Valid: true}
+
 	rowMap["read_only"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.ReadOnly), Valid: true}
 	rowMap["region"] = sqlutils.CellData{String: info.Region, Valid: true}
 	rowMap["replication_stopped"] = sqlutils.CellData{String: fmt.Sprintf("%v", info.ReplicationStopped), Valid: true}

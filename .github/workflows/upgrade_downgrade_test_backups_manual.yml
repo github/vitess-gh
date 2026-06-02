@@ -20,7 +20,7 @@ jobs:
   upgrade_downgrade_test_manual:
     timeout-minutes: 40
     name: Run Upgrade Downgrade Test - Backups - Manual
-    runs-on: ubuntu-latest-xl
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
 
     steps:
     - name: Skip CI
@@ -93,9 +93,10 @@ jobs:
         sudo service etcd stop
 
         wget https://repo.percona.com/apt/percona-release_latest.$(lsb_release -sc)_all.deb
-        sudo apt-get install -y gnupg2
+        sudo apt-get install -y gnupg2 lz4
         sudo dpkg -i percona-release_latest.$(lsb_release -sc)_all.deb
-        sudo percona-release enable-only tools
+        sudo percona-release enable tools
+        sudo percona-release setup pxb-80
         sudo apt-get update
         sudo apt-get install -y percona-xtrabackup-80
 

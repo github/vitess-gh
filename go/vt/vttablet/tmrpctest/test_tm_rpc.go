@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -578,6 +579,13 @@ func (fra *fakeRPCTM) ExecuteHook(ctx context.Context, hk *hook.Hook) *hook.Hook
 func tmRPCTestExecuteHook(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
 	hr, err := client.ExecuteHook(ctx, tablet, testExecuteHookHook)
 	compareError(t, "ExecuteHook", err, hr, testExecuteHookHookResult)
+}
+
+func tmRPCTestExecuteHookInvalidName(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
+	for _, name := range []string{"", "../etc/passwd", "/bin/ls"} {
+		_, err := client.ExecuteHook(ctx, tablet, &hook.Hook{Name: name})
+		assert.ErrorContains(t, err, "hook name must be a basename")
+	}
 }
 
 func tmRPCTestExecuteHookPanic(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
@@ -1236,7 +1244,7 @@ func tmRPCTestInitReplicaPanic(ctx context.Context, t *testing.T, client tmclien
 	expectHandleRPCPanic(t, "InitReplica", true /*verbose*/, err)
 }
 
-func (fra *fakeRPCTM) DemotePrimary(ctx context.Context) (*replicationdatapb.PrimaryStatus, error) {
+func (fra *fakeRPCTM) DemotePrimary(ctx context.Context, force bool) (*replicationdatapb.PrimaryStatus, error) {
 	if fra.panics {
 		panic(fmt.Errorf("test-triggered panic"))
 	}
@@ -1244,12 +1252,12 @@ func (fra *fakeRPCTM) DemotePrimary(ctx context.Context) (*replicationdatapb.Pri
 }
 
 func tmRPCTestDemotePrimary(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
-	PrimaryStatus, err := client.DemotePrimary(ctx, tablet)
+	PrimaryStatus, err := client.DemotePrimary(ctx, tablet, false)
 	compareError(t, "DemotePrimary", err, PrimaryStatus.Position, testPrimaryStatus.Position)
 }
 
 func tmRPCTestDemotePrimaryPanic(ctx context.Context, t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.Tablet) {
-	_, err := client.DemotePrimary(ctx, tablet)
+	_, err := client.DemotePrimary(ctx, tablet, false)
 	expectHandleRPCPanic(t, "DemotePrimary", true /*verbose*/, err)
 }
 
@@ -1554,6 +1562,7 @@ func Run(t *testing.T, client tmclient.TabletManagerClient, tablet *topodatapb.T
 	tmRPCTestChangeType(ctx, t, client, tablet)
 	tmRPCTestSleep(ctx, t, client, tablet)
 	tmRPCTestExecuteHook(ctx, t, client, tablet)
+	tmRPCTestExecuteHookInvalidName(ctx, t, client, tablet)
 	tmRPCTestRefreshState(ctx, t, client, tablet)
 	tmRPCTestRunHealthCheck(ctx, t, client, tablet)
 	tmRPCTestReloadSchema(ctx, t, client, tablet)

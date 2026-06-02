@@ -577,7 +577,7 @@ func (client *Client) ExecuteFetchAsDba(ctx context.Context, tablet *topodatapb.
 		DbName:                  topoproto.TabletDbName(tablet),
 		MaxRows:                 req.MaxRows,
 		DisableBinlogs:          req.DisableBinlogs,
-		ReloadSchema:            req.DisableBinlogs,
+		ReloadSchema:            req.ReloadSchema,
 		DisableForeignKeyChecks: req.DisableForeignKeyChecks,
 	})
 	if err != nil {
@@ -613,7 +613,7 @@ func (client *Client) ExecuteMultiFetchAsDba(ctx context.Context, tablet *topoda
 		DbName:                  topoproto.TabletDbName(tablet),
 		MaxRows:                 req.MaxRows,
 		DisableBinlogs:          req.DisableBinlogs,
-		ReloadSchema:            req.DisableBinlogs,
+		ReloadSchema:            req.ReloadSchema,
 		DisableForeignKeyChecks: req.DisableForeignKeyChecks,
 	})
 	if err != nil {
@@ -1154,13 +1154,13 @@ func (client *Client) InitReplica(ctx context.Context, tablet *topodatapb.Tablet
 }
 
 // DemotePrimary is part of the tmclient.TabletManagerClient interface.
-func (client *Client) DemotePrimary(ctx context.Context, tablet *topodatapb.Tablet) (*replicationdatapb.PrimaryStatus, error) {
+func (client *Client) DemotePrimary(ctx context.Context, tablet *topodatapb.Tablet, force bool) (*replicationdatapb.PrimaryStatus, error) {
 	c, closer, err := client.dialer.dial(ctx, tablet)
 	if err != nil {
 		return nil, err
 	}
 	defer closer.Close()
-	response, err := c.DemotePrimary(ctx, &tabletmanagerdatapb.DemotePrimaryRequest{})
+	response, err := c.DemotePrimary(ctx, &tabletmanagerdatapb.DemotePrimaryRequest{Force: force})
 	if err != nil {
 		return nil, err
 	}

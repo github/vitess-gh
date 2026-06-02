@@ -68087,6 +68087,7 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
          * Properties of a DemotePrimaryRequest.
          * @memberof tabletmanagerdata
          * @interface IDemotePrimaryRequest
+         * @property {boolean|null} [force] DemotePrimaryRequest force
          */
 
         /**
@@ -68103,6 +68104,14 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
                     if (properties[keys[i]] != null)
                         this[keys[i]] = properties[keys[i]];
         }
+
+        /**
+         * DemotePrimaryRequest force.
+         * @member {boolean} force
+         * @memberof tabletmanagerdata.DemotePrimaryRequest
+         * @instance
+         */
+        DemotePrimaryRequest.prototype.force = false;
 
         /**
          * Creates a new DemotePrimaryRequest instance using the specified properties.
@@ -68128,6 +68137,8 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
         DemotePrimaryRequest.encode = function encode(message, writer) {
             if (!writer)
                 writer = $Writer.create();
+            if (message.force != null && Object.hasOwnProperty.call(message, "force"))
+                writer.uint32(/* id 1, wireType 0 =*/8).bool(message.force);
             return writer;
         };
 
@@ -68162,6 +68173,10 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
             while (reader.pos < end) {
                 let tag = reader.uint32();
                 switch (tag >>> 3) {
+                case 1: {
+                        message.force = reader.bool();
+                        break;
+                    }
                 default:
                     reader.skipType(tag & 7);
                     break;
@@ -68197,6 +68212,9 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
         DemotePrimaryRequest.verify = function verify(message) {
             if (typeof message !== "object" || message === null)
                 return "object expected";
+            if (message.force != null && message.hasOwnProperty("force"))
+                if (typeof message.force !== "boolean")
+                    return "force: boolean expected";
             return null;
         };
 
@@ -68211,7 +68229,10 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
         DemotePrimaryRequest.fromObject = function fromObject(object) {
             if (object instanceof $root.tabletmanagerdata.DemotePrimaryRequest)
                 return object;
-            return new $root.tabletmanagerdata.DemotePrimaryRequest();
+            let message = new $root.tabletmanagerdata.DemotePrimaryRequest();
+            if (object.force != null)
+                message.force = Boolean(object.force);
+            return message;
         };
 
         /**
@@ -68223,8 +68244,15 @@ export const tabletmanagerdata = $root.tabletmanagerdata = (() => {
          * @param {$protobuf.IConversionOptions} [options] Conversion options
          * @returns {Object.<string,*>} Plain object
          */
-        DemotePrimaryRequest.toObject = function toObject() {
-            return {};
+        DemotePrimaryRequest.toObject = function toObject(message, options) {
+            if (!options)
+                options = {};
+            let object = {};
+            if (options.defaults)
+                object.force = false;
+            if (message.force != null && message.hasOwnProperty("force"))
+                object.force = message.force;
+            return object;
         };
 
         /**
