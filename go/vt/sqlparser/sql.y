@@ -207,6 +207,7 @@ func markBindVariable(yylex yyLexer, bvar string) {
   txAccessModes []TxAccessMode
   txAccessMode TxAccessMode
   killType KillType
+  ignoreOrReplaceType IgnoreOrReplaceType
 
   columnStorage ColumnStorage
   columnFormat ColumnFormat
@@ -271,6 +272,14 @@ func markBindVariable(yylex yyLexer, bvar string) {
 // Adding no precedence also works, since shifting is the default, but it reports some conflicts
 // We need to add a lower precedence to reducing the select_options_opt rule than shifting.
 %nonassoc <str> SELECT_OPTIONS
+// EMPTY_PARTITION_DEFINITIONS is used to resolve shift-reduce conflicts occurring due to '(' in CREATE TABLE ... SELECT statements with partition options.
+// When we see '(', we can either reduce partition_definitions_opt to empty or shift '(' to parse partition definitions.
+// We want shifting to take precedence, so we add lower precedence to the reduce rule.
+%nonassoc EMPTY_PARTITION_DEFINITIONS
+// EMPTY_IGNORE_OR_REPLACE is used to resolve shift-reduce conflicts occurring due to '(' in CREATE TABLE ... SELECT statements.
+// When we see '(', we can either reduce ignore_or_replace_opt to empty or shift '(' to parse table_spec.
+// We want shifting to take precedence, so we add lower precedence to the reduce rule.
+%nonassoc EMPTY_IGNORE_OR_REPLACE
 
 %token LEX_ERROR
 %left <str> UNION
@@ -353,7 +362,7 @@ func markBindVariable(yylex yyLexer, bvar string) {
 %token <str> SEQUENCE MERGE TEMPORARY TEMPTABLE INVOKER SECURITY FIRST AFTER LAST
 
 // Migration tokens
-%token <str> VITESS_MIGRATION CANCEL RETRY LAUNCH COMPLETE CLEANUP THROTTLE UNTHROTTLE FORCE_CUTOVER CUTOVER_THRESHOLD EXPIRE RATIO
+%token <str> VITESS_MIGRATION CANCEL RETRY LAUNCH COMPLETE CLEANUP THROTTLE UNTHROTTLE FORCE_CUTOVER CUTOVER_THRESHOLD EXPIRE RATIO POSTPONE
 // Throttler tokens
 %token <str> VITESS_THROTTLER
 
@@ -590,8 +599,9 @@ func markBindVariable(yylex yyLexer, bvar string) {
 %type <str> charset_or_character_set charset_or_character_set_or_names isolation_level
 %type <updateExpr> update_expression
 %type <str> for_from from_or_on
-%type <str> default_opt
+%type <str> default_opt value_or_values
 %type <ignore> ignore_opt
+%type <ignoreOrReplaceType> ignore_or_replace_opt
 %type <str> columns_or_fields extended_opt storage_opt
 %type <showFilter> like_or_where_opt like_opt
 %type <boolean> exists_opt not_exists_opt enforced enforced_opt temp_opt full_opt
@@ -1496,6 +1506,21 @@ create_statement:
   {
     // Create table [name] like [name]
     $1.OptLike = $2
+    $1.FullyParsed = true
+    $$ = $1
+  }
+| create_table_prefix ignore_or_replace_opt as_opt select_statement
+  {
+    $1.IgnoreOrReplace = $2
+    $1.Select = $4
+    $1.FullyParsed = true
+    $$ = $1
+  }
+| create_table_prefix table_spec ignore_or_replace_opt as_opt select_statement
+  {
+    $1.TableSpec = $2
+    $1.IgnoreOrReplace = $3
+    $1.Select = $5
     $1.FullyParsed = true
     $$ = $1
   }
@@ -3729,10 +3754,31 @@ alter_statement:
       UUID: string($4),
     }
   }
+| ALTER comment_opt VITESS_MIGRATION STRING COMPLETE VITESS_SHARDS STRING
+  {
+    $$ = &AlterMigration{
+      Type: CompleteMigrationType,
+      UUID: string($4),
+      Shards: string($7),
+    }
+  }
 | ALTER comment_opt VITESS_MIGRATION COMPLETE ALL
   {
     $$ = &AlterMigration{
       Type: CompleteAllMigrationType,
+    }
+  }
+| ALTER comment_opt VITESS_MIGRATION STRING POSTPONE COMPLETE
+  {
+    $$ = &AlterMigration{
+      Type: PostponeCompleteMigrationType,
+      UUID: string($4),
+    }
+  }
+| ALTER comment_opt VITESS_MIGRATION POSTPONE COMPLETE ALL
+  {
+    $$ = &AlterMigration{
+      Type: PostponeCompleteAllMigrationType,
     }
   }
 | ALTER comment_opt VITESS_MIGRATION STRING CANCEL
@@ -3870,6 +3916,7 @@ subpartition_opt:
   }
 
 partition_definitions_opt:
+  %prec EMPTY_PARTITION_DEFINITIONS
   {
     $$ = nil
   }
@@ -8280,7 +8327,7 @@ optionally_opt:
 // Because the rules are together, the parser can keep shifting
 // the tokens until it disambiguates a as sql_id and select as keyword.
 insert_data:
-  VALUES val_tuple_list row_alias_opt
+  value_or_values val_tuple_list row_alias_opt
   {
     $$ = &Insert{Rows: $2, RowAlias: $3}
   }
@@ -8288,11 +8335,11 @@ insert_data:
   {
     $$ = &Insert{Rows: $1}
   }
-| openb ins_column_list closeb VALUES val_tuple_list row_alias_opt
+| openb ins_column_list closeb value_or_values val_tuple_list row_alias_opt
   {
     $$ = &Insert{Columns: $2, Rows: $5, RowAlias: $6}
   }
-| openb closeb VALUES val_tuple_list row_alias_opt
+| openb closeb value_or_values val_tuple_list row_alias_opt
   {
     $$ = &Insert{Columns: []IdentifierCI{}, Rows: $4, RowAlias: $5}
   }
@@ -8300,6 +8347,10 @@ insert_data:
   {
     $$ = &Insert{Columns: $2, Rows: $4}
   }
+
+value_or_values:
+  VALUE
+| VALUES
 
 ins_column_list:
   sql_id
@@ -8443,6 +8494,10 @@ charset_value:
   {
     $$ = NewStrLiteral($1)
   }
+| BINARY
+  {
+    $$ = NewStrLiteral("binary")
+  }
 | DEFAULT
   {
     $$ = &Default{}
@@ -8471,6 +8526,14 @@ ignore_opt:
   { $$ = false }
 | IGNORE
   { $$ = true }
+
+ignore_or_replace_opt:
+  %prec EMPTY_IGNORE_OR_REPLACE
+  { $$ = NoIgnoreOrReplace }
+| IGNORE
+  { $$ = IgnoreType }
+| REPLACE
+  { $$ = ReplaceType }
 
 to_opt:
   { $$ = struct{}{} }
@@ -9201,6 +9264,7 @@ non_reserved_keyword:
 | USER
 | USER_RESOURCES
 | VALIDATION
+| VALUE
 | VAR_POP %prec FUNCTION_CALL_NON_KEYWORD
 | VAR_SAMP %prec FUNCTION_CALL_NON_KEYWORD
 | VARBINARY

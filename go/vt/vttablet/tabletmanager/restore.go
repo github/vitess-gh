@@ -38,11 +38,12 @@ import (
 	vtrpcpb "vitess.io/vitess/go/vt/proto/vtrpc"
 	"vitess.io/vitess/go/vt/servenv"
 	"vitess.io/vitess/go/vt/topo/topoproto"
+	"vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/vterrors"
 )
 
 // This file handles the initial backup restore upon startup.
-// It is only enabled if restore_from_backup is set.
+// It is only enabled if restore-from-backup is set.
 
 var (
 	restoreFromBackup               bool
@@ -56,11 +57,11 @@ var (
 )
 
 func registerRestoreFlags(fs *pflag.FlagSet) {
-	fs.BoolVar(&restoreFromBackup, "restore_from_backup", restoreFromBackup, "(init restore parameter) will check BackupStorage for a recent backup at startup and start there")
+	utils.SetFlagBoolVar(fs, &restoreFromBackup, "restore-from-backup", restoreFromBackup, "(init restore parameter) will check BackupStorage for a recent backup at startup and start there")
 	fs.StringSliceVar(&restoreFromBackupAllowedEngines, "restore-from-backup-allowed-engines", restoreFromBackupAllowedEngines, "(init restore parameter) if set, only backups taken with the specified engines are eligible to be restored")
-	fs.StringVar(&restoreFromBackupTsStr, "restore_from_backup_ts", restoreFromBackupTsStr, "(init restore parameter) if set, restore the latest backup taken at or before this timestamp. Example: '2021-04-29.133050'")
-	fs.IntVar(&restoreConcurrency, "restore_concurrency", restoreConcurrency, "(init restore parameter) how many concurrent files to restore at once")
-	fs.DurationVar(&waitForBackupInterval, "wait_for_backup_interval", waitForBackupInterval, "(init restore parameter) if this is greater than 0, instead of starting up empty when no backups are found, keep checking at this interval for a backup to appear")
+	utils.SetFlagStringVar(fs, &restoreFromBackupTsStr, "restore-from-backup-ts", restoreFromBackupTsStr, "(init restore parameter) if set, restore the latest backup taken at or before this timestamp. Example: '2021-04-29.133050'")
+	utils.SetFlagIntVar(fs, &restoreConcurrency, "restore-concurrency", restoreConcurrency, "(init restore parameter) how many concurrent files to restore at once")
+	utils.SetFlagDurationVar(fs, &waitForBackupInterval, "wait-for-backup-interval", waitForBackupInterval, "(init restore parameter) if this is greater than 0, instead of starting up empty when no backups are found, keep checking at this interval for a backup to appear")
 }
 
 var (
@@ -98,7 +99,8 @@ func (tm *TabletManager) RestoreData(
 	restoreToTimetamp time.Time,
 	restoreToPos string,
 	allowedBackupEngines []string,
-	mysqlShutdownTimeout time.Duration) error {
+	mysqlShutdownTimeout time.Duration,
+) error {
 	if err := tm.lock(ctx); err != nil {
 		return err
 	}
@@ -156,7 +158,6 @@ func (tm *TabletManager) RestoreData(
 }
 
 func (tm *TabletManager) restoreDataLocked(ctx context.Context, logger logutil.Logger, waitForBackupInterval time.Duration, deleteBeforeRestore bool, request *tabletmanagerdatapb.RestoreFromBackupRequest, mysqlShutdownTimeout time.Duration) error {
-
 	tablet := tm.Tablet()
 	originalType := tablet.Type
 	// Try to restore. Depending on the reason for failure, we may be ok.
@@ -252,7 +253,7 @@ func (tm *TabletManager) restoreDataLocked(ctx context.Context, logger logutil.L
 			break
 		}
 
-		log.Infof("No backup found. Waiting %v (from -wait_for_backup_interval flag) to check again.", waitForBackupInterval)
+		log.Infof("No backup found. Waiting %v (from -wait-for-backup-interval flag) to check again.", waitForBackupInterval)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -303,7 +304,7 @@ func (tm *TabletManager) restoreDataLocked(ctx context.Context, logger logutil.L
 		return vterrors.Wrap(err, "Can't restore backup")
 	}
 
-	// If we had type BACKUP or RESTORE it's better to set our type to the init_tablet_type to make result of the restore
+	// If we had type BACKUP or RESTORE it's better to set our type to the init-tablet-type to make result of the restore
 	// similar to completely clean start from scratch.
 	if (originalType == topodatapb.TabletType_BACKUP || originalType == topodatapb.TabletType_RESTORE) && initTabletType != "" {
 		initType, err := topoproto.ParseTabletType(initTabletType)

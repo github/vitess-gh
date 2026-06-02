@@ -24,16 +24,36 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	vtutils "vitess.io/vitess/go/vt/utils"
 
 	"google.golang.org/protobuf/encoding/prototext"
 
 	"vitess.io/vitess/go/vt/log"
 	"vitess.io/vitess/go/vt/servenv"
 )
+
+var versionRegex = regexp.MustCompile(`Version: ([0-9]+)\.([0-9]+)\.([0-9]+)`)
+
+// getMajorVersion extracts the major version from a binary by running binaryName --version
+func getMajorVersion(binaryName string) (int, error) {
+	version, err := exec.Command(binaryName, "--version").Output()
+	if err != nil {
+		return 0, err
+	}
+	v := versionRegex.FindStringSubmatch(string(version))
+	if len(v) != 4 {
+		return 0, fmt.Errorf("could not parse server version from: %s", version)
+	}
+
+	return strconv.Atoi(v[1])
+}
 
 // HealthChecker is a callback that impements a service-specific health check
 // It must return true if the service at the given `addr` is reachable, false
@@ -136,12 +156,12 @@ func (vtp *VtProcess) WaitStart() (err error) {
 	)
 
 	if vtp.PortGrpc != 0 {
-		vtp.proc.Args = append(vtp.proc.Args, "--grpc_port")
+		vtp.proc.Args = append(vtp.proc.Args, "--grpc-port")
 		vtp.proc.Args = append(vtp.proc.Args, fmt.Sprintf("%d", vtp.PortGrpc))
 	}
 
 	if vtp.BindAddressGprc != "" {
-		vtp.proc.Args = append(vtp.proc.Args, "--grpc_bind_address")
+		vtp.proc.Args = append(vtp.proc.Args, "--grpc-bind-address")
 		vtp.proc.Args = append(vtp.proc.Args, vtp.BindAddressGprc)
 	}
 
@@ -172,6 +192,10 @@ func (vtp *VtProcess) WaitStart() (err error) {
 
 		select {
 		case err := <-vtp.exit:
+			// Drop the exec.Cmd so a subsequent WaitTerminate() does not
+			// signal a dead pid and then block forever on the already-drained
+			// exit channel.
+			vtp.proc = nil
 			return fmt.Errorf("process '%s' exited prematurely (err: %s)", vtp.Name, err)
 		default:
 			time.Sleep(300 * time.Millisecond)
@@ -179,7 +203,9 @@ func (vtp *VtProcess) WaitStart() (err error) {
 	}
 
 	vtp.proc.Process.Kill()
-	return fmt.Errorf("process '%s' timed out after 60s (err: %s)", vtp.Name, <-vtp.exit)
+	exitErr := <-vtp.exit
+	vtp.proc = nil
+	return fmt.Errorf("process '%s' timed out after 60s (err: %s)", vtp.Name, exitErr)
 }
 
 const (
@@ -231,69 +257,75 @@ func VtcomboProcess(environment Environment, args *Config, mysql MySQLManager) (
 	}
 	protoTopo, _ := prototext.Marshal(args.Topology)
 	vt.ExtraArgs = append(vt.ExtraArgs, []string{
-		"--db_charset", charset,
-		"--db_app_user", user,
-		"--db_app_password", pass,
-		"--db_dba_user", user,
-		"--db_dba_password", pass,
-		"--proto_topo", string(protoTopo),
-		"--mycnf_server_id", "1",
-		"--mycnf_socket_file", socket,
-		"--normalize_queries",
-		"--dbddl_plugin", "vttest",
-		"--foreign_key_mode", args.ForeignKeyMode,
+		//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
+		"--db-charset", charset,
+		"--db-app-user", user,
+		"--db-app-password", pass,
+		"--db-dba-user", user,
+		"--db-dba-password", pass,
+		"--proto-topo", string(protoTopo),
+		"--mycnf-server-id", "1",
+		"--mycnf-socket-file", socket,
+		"--normalize-queries",
+		"--dbddl-plugin", "vttest",
+		"--foreign-key-mode", args.ForeignKeyMode,
 		"--planner-version", args.PlannerVersion,
-		fmt.Sprintf("--enable_online_ddl=%t", args.EnableOnlineDDL),
-		fmt.Sprintf("--enable_direct_ddl=%t", args.EnableDirectDDL),
-		fmt.Sprintf("--enable_system_settings=%t", args.EnableSystemSettings),
-		fmt.Sprintf("--no_scatter=%t", args.NoScatter),
+		fmt.Sprintf("--enable-online-ddl=%t", args.EnableOnlineDDL),
+		fmt.Sprintf("--enable-direct-ddl=%t", args.EnableDirectDDL),
+		fmt.Sprintf("--enable-system-settings=%t", args.EnableSystemSettings),
+		fmt.Sprintf("--no-scatter=%t", args.NoScatter),
 	}...)
 
 	// If topo tablet refresh interval is not defined then we will give it value of 10s. Please note
 	// that the default value is 1 minute, but we are keeping it low to make vttestserver perform faster.
 	// Less value might result in high pressure on topo but for testing purpose that should not be a concern.
 	if args.VtgateTabletRefreshInterval <= 0 {
-		vt.ExtraArgs = append(vt.ExtraArgs, fmt.Sprintf("--tablet_refresh_interval=%v", 10*time.Second))
+		vt.ExtraArgs = append(vt.ExtraArgs, fmt.Sprintf("--tablet-refresh-interval=%v", 10*time.Second))
 	} else {
-		vt.ExtraArgs = append(vt.ExtraArgs, fmt.Sprintf("--tablet_refresh_interval=%v", args.VtgateTabletRefreshInterval))
+		vt.ExtraArgs = append(vt.ExtraArgs, fmt.Sprintf("--tablet-refresh-interval=%v", args.VtgateTabletRefreshInterval))
 	}
 
 	vt.ExtraArgs = append(vt.ExtraArgs, QueryServerArgs...)
 	vt.ExtraArgs = append(vt.ExtraArgs, environment.VtcomboArguments()...)
 
+	//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 	if args.SchemaDir != "" {
-		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--schema_dir", args.SchemaDir}...)
+		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--schema-dir", args.SchemaDir}...)
 	}
 	if args.PersistentMode && args.DataDir != "" {
 		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--vschema-persistence-dir", path.Join(args.DataDir, "vschema_data")}...)
 	}
 	if args.TransactionMode != "" {
-		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--transaction_mode", args.TransactionMode}...)
+		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--transaction-mode", args.TransactionMode}...)
 	}
 	if args.TransactionTimeout != 0 {
 		vt.ExtraArgs = append(vt.ExtraArgs, "--queryserver-config-transaction-timeout", fmt.Sprintf("%v", args.TransactionTimeout))
 	}
 	if args.TabletHostName != "" {
-		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--tablet_hostname", args.TabletHostName}...)
+		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--tablet-hostname", args.TabletHostName}...)
 	}
 	if servenv.GRPCAuth() == "mtls" {
-		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--grpc_auth_mode", servenv.GRPCAuth(), "--grpc_key", servenv.GRPCKey(), "--grpc_cert", servenv.GRPCCert(), "--grpc_ca", servenv.GRPCCertificateAuthority(), "--grpc_auth_mtls_allowed_substrings", servenv.ClientCertSubstrings()}...)
+		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--grpc-auth-mode", servenv.GRPCAuth(), "--grpc-key", servenv.GRPCKey(), "--grpc-cert", servenv.GRPCCert(), "--grpc-ca", servenv.GRPCCertificateAuthority(), "--grpc-auth-mtls-allowed-substrings", servenv.ClientCertSubstrings()}...)
+	}
+	vtVer, err := getMajorVersion(vt.Binary)
+	if err != nil {
+		return nil, err
 	}
 	if args.VSchemaDDLAuthorizedUsers != "" {
-		vt.ExtraArgs = append(vt.ExtraArgs, []string{"--vschema_ddl_authorized_users", args.VSchemaDDLAuthorizedUsers}...)
+		vt.ExtraArgs = append(vt.ExtraArgs, []string{vtutils.GetFlagVariantForTestsByVersion("--vschema-ddl-authorized-users", vtVer), args.VSchemaDDLAuthorizedUsers}...)
 	}
-	vt.ExtraArgs = append(vt.ExtraArgs, "--mysql_server_version", servenv.MySQLServerVersion())
+	vt.ExtraArgs = append(vt.ExtraArgs, "--mysql-server-version", servenv.MySQLServerVersion())
 	if socket != "" {
 		vt.ExtraArgs = append(vt.ExtraArgs, []string{
-			"--db_socket", socket,
+			"--db-socket", socket,
 		}...)
 	} else {
 		hostname, p := mysql.Address()
 		port := fmt.Sprintf("%d", p)
 
 		vt.ExtraArgs = append(vt.ExtraArgs, []string{
-			"--db_host", hostname,
-			"--db_port", port,
+			"--db-host", hostname,
+			"--db-port", port,
 		}...)
 	}
 
@@ -304,17 +336,17 @@ func VtcomboProcess(environment Environment, args *Config, mysql MySQLManager) (
 	}
 
 	vt.ExtraArgs = append(vt.ExtraArgs, []string{
-		"--mysql_auth_server_impl", "none",
-		"--mysql_server_port", fmt.Sprintf("%d", vtcomboMysqlPort),
-		"--mysql_server_bind_address", vtcomboMysqlBindAddress,
+		"--mysql-auth-server-impl", "none",
+		"--mysql-server-port", fmt.Sprintf("%d", vtcomboMysqlPort),
+		"--mysql-server-bind-address", vtcomboMysqlBindAddress,
 	}...)
 
 	if args.ExternalTopoImplementation != "" {
 		vt.ExtraArgs = append(vt.ExtraArgs, []string{
-			"--external_topo_server",
-			"--topo_implementation", args.ExternalTopoImplementation,
-			"--topo_global_server_address", args.ExternalTopoGlobalServerAddress,
-			"--topo_global_root", args.ExternalTopoGlobalRoot,
+			"--external-topo-server",
+			"--topo-implementation", args.ExternalTopoImplementation,
+			"--topo-global-server-address", args.ExternalTopoGlobalServerAddress,
+			"--topo-global-root", args.ExternalTopoGlobalRoot,
 		}...)
 	}
 

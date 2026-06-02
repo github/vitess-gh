@@ -18,6 +18,8 @@ package inst
 
 import (
 	"fmt"
+	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -49,10 +51,27 @@ func initializeAnalysisDaoPostConfiguration() {
 	recentInstantAnalysis = cache.New(config.GetRecoveryPollDuration()*2, time.Second)
 }
 
+// declaresBefore returns true if the problem declares (via BeforeAnalyses)
+// that it should run before the given analysis code. This is used to decide
+// whether a tablet's analysis should survive despite a shard-wide action.
+func declaresBefore(problem *DetectionAnalysisProblem, code AnalysisCode) bool {
+	return slices.Contains(problem.BeforeAnalyses, code)
+}
+
+// declaresAfter returns true if the shard-wide problem declares (via
+// AfterAnalyses) that it should run after the given analysis code.
+// This is the symmetric counterpart to declaresBefore — a dependency
+// can be expressed from either side.
+func declaresAfter(shardWideProblem *DetectionAnalysisProblem, code AnalysisCode) bool {
+	return slices.Contains(shardWideProblem.AfterAnalyses, code)
+}
+
 type clusterAnalysis struct {
-	hasShardWideAction bool
-	totalTablets       int
-	primaryAlias       string
+	hasShardWideAction    bool
+	shardWideAnalysisCode AnalysisCode
+	shardWideProblem      *DetectionAnalysisProblem
+	totalTablets          int
+	primaryAlias          string
 
 	// primaryTimestamp is the most recent primary term start time observed for the shard.
 	primaryTimestamp time.Time
@@ -61,7 +80,7 @@ type clusterAnalysis struct {
 	durability policy.Durabler
 }
 
-// GetDetectionAnalysis will check for replication problems (dead primary; unreachable primary; etc)
+// GetDetectionAnalysis will check for detected problems (dead primary; unreachable primary; etc)
 func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysisHints) ([]*DetectionAnalysis, error) {
 	var result []*DetectionAnalysis
 	appendAnalysis := func(analysis *DetectionAnalysis) {
@@ -81,7 +100,9 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 		vitess_keyspace.keyspace AS keyspace,
 		vitess_keyspace.keyspace_type AS keyspace_type,
 		vitess_keyspace.durability_policy AS durability_policy,
+		vitess_keyspace.disable_emergency_reparent AS keyspace_disable_emergency_reparent,
 		vitess_shard.primary_timestamp AS shard_primary_term_timestamp,
+		vitess_shard.disable_emergency_reparent AS shard_disable_emergency_reparent,
 		primary_instance.read_only AS read_only,
 		MIN(primary_instance.gtid_errant) AS gtid_errant,
 		MIN(primary_instance.alias) IS NULL AS is_invalid,
@@ -316,9 +337,11 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 		}
 
 		a.TabletType = tablet.Type
-		a.CurrentTabletType = topodatapb.TabletType(m.GetInt("current_tablet_type"))
+		a.CurrentTabletType = topodatapb.TabletType(m.GetInt32("current_tablet_type"))
 		a.AnalyzedKeyspace = m.GetString("keyspace")
 		a.AnalyzedShard = m.GetString("shard")
+		a.AnalyzedKeyspaceEmergencyReparentDisabled = m.GetBool("keyspace_disable_emergency_reparent")
+		a.AnalyzedShardEmergencyReparentDisabled = m.GetBool("shard_disable_emergency_reparent")
 		a.PrimaryTimeStamp = m.GetTime("primary_timestamp")
 
 		if keyspaceType := topodatapb.KeyspaceType(m.GetInt32("keyspace_type")); keyspaceType == topodatapb.KeyspaceType_SNAPSHOT {
@@ -326,7 +349,7 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 			return nil
 		}
 
-		a.ShardPrimaryTermTimestamp = m.GetString("shard_primary_term_timestamp")
+		a.ShardPrimaryTermTimestamp = m.GetTime("shard_primary_term_timestamp")
 		a.IsPrimary = m.GetBool("is_primary")
 		a.AnalyzedInstanceAlias = topoproto.TabletAliasString(tablet.Alias)
 		a.AnalyzedInstancePrimaryAlias = topoproto.TabletAliasString(primaryTablet.Alias)
@@ -336,8 +359,6 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 			Type:    BinaryLog,
 		}
 		isStaleBinlogCoordinates := m.GetBool("is_stale_binlog_coordinates")
-		a.ClusterDetails.Keyspace = m.GetString("keyspace")
-		a.ClusterDetails.Shard = m.GetString("shard")
 		a.GTIDMode = m.GetString("gtid_mode")
 		a.LastCheckValid = m.GetBool("is_last_check_valid")
 		a.LastCheckPartialSuccess = m.GetBool("last_check_partial_success")
@@ -381,13 +402,13 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 
 		if !a.LastCheckValid {
 			analysisMessage := fmt.Sprintf("analysis: Alias: %+v, Keyspace: %+v, Shard: %+v, IsPrimary: %+v, LastCheckValid: %+v, LastCheckPartialSuccess: %+v, CountReplicas: %+v, CountValidReplicas: %+v, CountValidReplicatingReplicas: %+v, CountLaggingReplicas: %+v, CountDelayedReplicas: %+v",
-				a.AnalyzedInstanceAlias, a.ClusterDetails.Keyspace, a.ClusterDetails.Shard, a.IsPrimary, a.LastCheckValid, a.LastCheckPartialSuccess, a.CountReplicas, a.CountValidReplicas, a.CountValidReplicatingReplicas, a.CountLaggingReplicas, a.CountDelayedReplicas,
+				a.AnalyzedInstanceAlias, a.AnalyzedKeyspace, a.AnalyzedShard, a.IsPrimary, a.LastCheckValid, a.LastCheckPartialSuccess, a.CountReplicas, a.CountValidReplicas, a.CountValidReplicatingReplicas, a.CountLaggingReplicas, a.CountDelayedReplicas,
 			)
 			if util.ClearToLog("analysis_dao", analysisMessage) {
 				log.Infof(analysisMessage)
 			}
 		}
-		keyspaceShard := getKeyspaceShardName(a.ClusterDetails.Keyspace, a.ClusterDetails.Shard)
+		keyspaceShard := getKeyspaceShardName(a.AnalyzedKeyspace, a.AnalyzedShard)
 		if clusters[keyspaceShard] == nil {
 			clusters[keyspaceShard] = &clusterAnalysis{}
 			if a.TabletType == topodatapb.TabletType_PRIMARY {
@@ -411,10 +432,9 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 		ca := clusters[keyspaceShard]
 		// Increment the total number of tablets.
 		ca.totalTablets += 1
-		if ca.hasShardWideAction {
-			// We can only take one shard-wide action at a time.
-			return nil
-		}
+		// Note: when ca.hasShardWideAction is true, we still run matching
+		// below to check if this tablet's problem declares it must run
+		// before the shard-wide action (via BeforeAnalyses).
 		if ca.durability == nil {
 			// We failed to load the durability policy, so we shouldn't run any analysis
 			return nil
@@ -432,6 +452,11 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 				matchedProblems = append(matchedProblems, problem)
 			}
 		}
+		if ca.hasShardWideAction && len(matchedProblems) == 0 {
+			// Shard-wide action already detected and no problems matched
+			// for this tablet — suppress it.
+			return nil
+		}
 		if len(matchedProblems) > 0 {
 			sortDetectionAnalysisMatchedProblems(matchedProblems)
 			for _, problem := range matchedProblems {
@@ -443,12 +468,96 @@ func GetDetectionAnalysis(keyspace string, shard string, hints *DetectionAnalysi
 			chosenProblem := matchedProblems[0]
 			a.Analysis = chosenProblem.Meta.Analysis
 			a.Description = chosenProblem.Meta.Description
-			ca.hasShardWideAction = chosenProblem.Meta.Priority == detectionAnalysisPriorityShardWideAction
+			// Per-decision log keys gated by util.ClearToLog so operators
+			// see the first occurrence of each unique prioritization decision
+			// and a periodic refresh while it persists, without flooding the
+			// log every analysis cycle for the duration of an incident.
+			tabletAliasString := topoproto.TabletAliasString(tablet.Alias)
+			if chosenProblem.Meta.Priority == detectionAnalysisPriorityShardWideAction {
+				if ca.hasShardWideAction {
+					// Already have a shard-wide action — suppress this one.
+					key := fmt.Sprintf("%s.%s.%s.%s.%s", tabletAliasString, a.AnalyzedKeyspace, a.AnalyzedShard, chosenProblem.Meta.Analysis, ca.shardWideAnalysisCode)
+					if util.ClearToLog("analysis_dao.suppress_duplicate_shard_wide", key) {
+						log.Info(
+							"suppressing duplicate shard-wide action",
+							slog.String("tablet", tabletAliasString),
+							slog.String("keyspace", a.AnalyzedKeyspace),
+							slog.String("shard", a.AnalyzedShard),
+							slog.String("suppressed", string(chosenProblem.Meta.Analysis)),
+							slog.String("active_shard_wide", string(ca.shardWideAnalysisCode)),
+						)
+					}
+					return nil
+				}
+				ca.hasShardWideAction = true
+				ca.shardWideAnalysisCode = chosenProblem.Meta.Analysis
+				ca.shardWideProblem = chosenProblem
+			} else if ca.hasShardWideAction {
+				// A shard-wide action was already detected. Only keep this
+				// tablet's analysis if a dependency exists between it and
+				// the shard-wide action. The dependency can be expressed
+				// from either side:
+				//   - the tablet's problem declares BeforeAnalyses on
+				//     the shard-wide action, OR
+				//   - the shard-wide problem declares AfterAnalyses on
+				//     the tablet's problem.
+				// If a non-chosen problem declares the dependency, promote
+				// it to the chosen problem so the recovery targets it.
+				survives := func(p *DetectionAnalysisProblem) bool {
+					return declaresBefore(p, ca.shardWideAnalysisCode) ||
+						declaresAfter(ca.shardWideProblem, p.Meta.Analysis)
+				}
+				if survives(chosenProblem) {
+					key := fmt.Sprintf("%s.%s.%s.%s.%s", tabletAliasString, a.AnalyzedKeyspace, a.AnalyzedShard, chosenProblem.Meta.Analysis, ca.shardWideAnalysisCode)
+					if util.ClearToLog("analysis_dao.prioritize", key) {
+						log.Info(
+							"prioritizing tablet problem before shard-wide action",
+							slog.String("tablet", tabletAliasString),
+							slog.String("keyspace", a.AnalyzedKeyspace),
+							slog.String("shard", a.AnalyzedShard),
+							slog.String("chosen", string(chosenProblem.Meta.Analysis)),
+							slog.String("deferred_shard_wide", string(ca.shardWideAnalysisCode)),
+						)
+					}
+				} else {
+					found := false
+					for _, p := range matchedProblems[1:] {
+						if survives(p) {
+							key := fmt.Sprintf("%s.%s.%s.%s.%s.%s", tabletAliasString, a.AnalyzedKeyspace, a.AnalyzedShard, p.Meta.Analysis, chosenProblem.Meta.Analysis, ca.shardWideAnalysisCode)
+							if util.ClearToLog("analysis_dao.prioritize_alt", key) {
+								log.Info(
+									"prioritizing tablet problem before shard-wide action",
+									slog.String("tablet", tabletAliasString),
+									slog.String("keyspace", a.AnalyzedKeyspace),
+									slog.String("shard", a.AnalyzedShard),
+									slog.String("chosen", string(p.Meta.Analysis)),
+									slog.String("higher_priority_skipped", string(chosenProblem.Meta.Analysis)),
+									slog.String("deferred_shard_wide", string(ca.shardWideAnalysisCode)),
+								)
+							}
+							a.Analysis = p.Meta.Analysis
+							a.Description = p.Meta.Description
+							found = true
+							break
+						}
+					}
+					if !found {
+						key := fmt.Sprintf("%s.%s.%s.%s.%s", tabletAliasString, a.AnalyzedKeyspace, a.AnalyzedShard, chosenProblem.Meta.Analysis, ca.shardWideAnalysisCode)
+						if util.ClearToLog("analysis_dao.suppress_tablet", key) {
+							log.Info(
+								"suppressing tablet problem in favor of shard-wide action",
+								slog.String("tablet", tabletAliasString),
+								slog.String("keyspace", a.AnalyzedKeyspace),
+								slog.String("shard", a.AnalyzedShard),
+								slog.String("suppressed", string(chosenProblem.Meta.Analysis)),
+								slog.String("shard_wide", string(ca.shardWideAnalysisCode)),
+							)
+						}
+						return nil
+					}
+				}
+			}
 		}
-		//		 else if a.IsPrimary && a.CountReplicas == 0 {
-		//			a.Analysis = PrimaryWithoutReplicas
-		//			a.Description = "Primary has no replicas"
-		//		}
 
 		{
 			// Moving on to structure analysis
@@ -530,14 +639,14 @@ func postProcessAnalyses(result []*DetectionAnalysis, clusters map[string]*clust
 			// If one of them is an InvalidPrimary, then we see if all the other tablets in this keyspace shard are
 			// unable to replicate or not.
 			if analysis.Analysis == InvalidPrimary {
-				keyspaceName := analysis.ClusterDetails.Keyspace
-				shardName := analysis.ClusterDetails.Shard
+				keyspaceName := analysis.AnalyzedKeyspace
+				shardName := analysis.AnalyzedShard
 				keyspaceShard := getKeyspaceShardName(keyspaceName, shardName)
 				totalReplicas := clusters[keyspaceShard].totalTablets - 1
 				var notReplicatingReplicas []int
 				for idx, replicaAnalysis := range result {
-					if replicaAnalysis.ClusterDetails.Keyspace == keyspaceName &&
-						replicaAnalysis.ClusterDetails.Shard == shardName && topo.IsReplicaType(replicaAnalysis.TabletType) {
+					if replicaAnalysis.AnalyzedKeyspace == keyspaceName &&
+						replicaAnalysis.AnalyzedShard == shardName && topo.IsReplicaType(replicaAnalysis.TabletType) {
 						// If the replica's last check is invalid or its replication is stopped, then we consider as not replicating.
 						if !replicaAnalysis.LastCheckValid || replicaAnalysis.ReplicationStopped {
 							notReplicatingReplicas = append(notReplicatingReplicas, idx)
@@ -580,7 +689,8 @@ func auditInstanceAnalysisInChangelog(tabletAlias string, analysisCode AnalysisC
 	// Find if the lastAnalysisHasChanged or not while updating the row if it has.
 	lastAnalysisChanged := false
 	{
-		sqlResult, err := db.ExecVTOrc(`UPDATE database_instance_last_analysis
+		sqlResult, err := db.ExecVTOrc(
+			`UPDATE database_instance_last_analysis
 			SET
 				analysis = ?,
 				analysis_timestamp = DATETIME('now')
@@ -607,7 +717,8 @@ func auditInstanceAnalysisInChangelog(tabletAlias string, analysisCode AnalysisC
 	firstInsertion := false
 	if !lastAnalysisChanged {
 		// The insert only returns more than 1 row changed if this is the first insertion.
-		sqlResult, err := db.ExecVTOrc(`INSERT OR IGNORE
+		sqlResult, err := db.ExecVTOrc(
+			`INSERT OR IGNORE
 			INTO database_instance_last_analysis (
 				alias,
 				analysis_timestamp,
@@ -636,7 +747,8 @@ func auditInstanceAnalysisInChangelog(tabletAlias string, analysisCode AnalysisC
 		return nil
 	}
 
-	_, err := db.ExecVTOrc(`INSERT
+	_, err := db.ExecVTOrc(
+		`INSERT
 		INTO database_instance_analysis_changelog (
 			alias,
 			analysis_timestamp,
@@ -658,7 +770,8 @@ func auditInstanceAnalysisInChangelog(tabletAlias string, analysisCode AnalysisC
 
 // ExpireInstanceAnalysisChangelog removes old-enough analysis entries from the changelog
 func ExpireInstanceAnalysisChangelog() error {
-	_, err := db.ExecVTOrc(`DELETE
+	_, err := db.ExecVTOrc(
+		`DELETE
 		FROM database_instance_analysis_changelog
 		WHERE
 			analysis_timestamp < DATETIME('now', PRINTF('-%d HOUR', ?))

@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"vitess.io/vitess/go/vt/mysqlctl"
+	"vitess.io/vitess/go/vt/utils"
 )
 
 var Init = &cobra.Command{
@@ -33,8 +34,8 @@ var Init = &cobra.Command{
 		"The MySQL version and flavor will be auto-detected, with a minimal configuration file applied.",
 	Example: `mysqlctl \
 	--alsologtostderr \
-	--tablet_uid 101 \
-	--mysql_port 12345 \
+	--tablet-uid 101 \
+	--mysql-port 12345 \
 	init`,
 	Args: cobra.NoArgs,
 	RunE: commandInit,
@@ -64,8 +65,8 @@ func commandInit(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	Init.Flags().DurationVar(&initArgs.WaitTime, "wait_time", initArgs.WaitTime, "How long to wait for mysqld startup.")
-	Init.Flags().StringVar(&initArgs.InitDbSQLFile, "init_db_sql_file", initArgs.InitDbSQLFile, "Path to .sql file to run after mysqld initiliaztion.")
+	utils.SetFlagDurationVar(Init.Flags(), &initArgs.WaitTime, "wait-time", initArgs.WaitTime, "How long to wait for mysqld startup.")
+	utils.SetFlagStringVar(Init.Flags(), &initArgs.InitDbSQLFile, "init-db-sql-file", initArgs.InitDbSQLFile, "Path to .sql file to run after mysqld initiliaztion.")
 
 	Root.AddCommand(Init)
 }

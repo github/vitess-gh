@@ -30,7 +30,7 @@ import (
 // TestRunFailsToStartTabletManager tests the code path in 'run' where we fail to start the TabletManager
 // this is done by starting vttablet without a cnf file but requesting it to restore from backup.
 // When starting, the TabletManager checks if it needs to restore, in tm.handleRestore but this step will
-// fail if we do not provide a cnf file and if the flag --restore_from_backup is provided.
+// fail if we do not provide a cnf file and if the flag --restore-from-backup is provided.
 func TestRunFailsToStartTabletManager(t *testing.T) {
 	ts, factory := memorytopo.NewServerAndFactory(context.Background(), "cell")
 	topo.RegisterFactory("test", factory)
@@ -42,17 +42,32 @@ func TestRunFailsToStartTabletManager(t *testing.T) {
 		os.Args = append([]string{}, args...)
 	})
 
-	os.Args = []string{"vttablet",
-		"--topo_implementation", "test", "--topo_global_server_address", "localhost", "--topo_global_root", "cell",
-		"--db_host", "localhost", "--db_port", "3306",
-		"--tablet-path", "cell-1", "--init_keyspace", "ks", "--init_shard", "0", "--init_tablet_type", "replica",
-		"--restore_from_backup",
+	flags := map[string]string{
+		"--topo-implementation":        "test",
+		"--topo-global-server-address": "localhost",
+		"--topo-global-root":           "cell",
+		"--db-host":                    "localhost",
+		"--db-port":                    "3306",
+		"--init-keyspace":              "ks",
+		"--init-shard":                 "0",
+		"--init-tablet-type":           "replica",
 	}
+
+	var flagArgs []string
+	for flag, value := range flags {
+		flagArgs = append(flagArgs, flag, value)
+	}
+
+	flagArgs = append(flagArgs,
+		"--tablet-path", "cell-1", "--restore-from-backup",
+	)
+
+	os.Args = append([]string{"vttablet"}, flagArgs...)
 
 	// Creating and canceling the context so that pending tasks in tm_init gets canceled before we close the topo server
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	err := Main.ExecuteContext(ctx)
-	require.ErrorContains(t, err, "you cannot enable --restore_from_backup without a my.cnf file")
+	require.ErrorContains(t, err, "you cannot enable --restore-from-backup without a my.cnf file")
 }

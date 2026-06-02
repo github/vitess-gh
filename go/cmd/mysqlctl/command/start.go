@@ -25,13 +25,14 @@ import (
 
 	"vitess.io/vitess/go/flagutil"
 	"vitess.io/vitess/go/vt/mysqlctl"
+	"vitess.io/vitess/go/vt/utils"
 )
 
 var Start = &cobra.Command{
 	Use:     "start",
 	Short:   "Starts mysqld on an already 'init'-ed directory.",
 	Long:    "Resume an existing `mysqld` instance that was previously bootstrapped with `init` or `init_config`",
-	Example: `mysqlctl --tablet_uid 101 --alsologtostderr start`,
+	Example: `mysqlctl --tablet-uid 101 --alsologtostderr start`,
 	Args:    cobra.NoArgs,
 	RunE:    commandStart,
 }
@@ -60,8 +61,8 @@ func commandStart(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	Start.Flags().DurationVar(&startArgs.WaitTime, "wait_time", startArgs.WaitTime, "How long to wait for mysqld startup.")
-	Start.Flags().Var(&startArgs.MySQLdArgs, "mysqld_args", "List of comma-separated flags to pass additionally to mysqld.")
+	utils.SetFlagDurationVar(Start.Flags(), &startArgs.WaitTime, "wait-time", startArgs.WaitTime, "How long to wait for mysqld startup.")
+	Start.Flags().Var(&startArgs.MySQLdArgs, "mysqld-args", "List of comma-separated flags to pass additionally to mysqld.")
 
 	Root.AddCommand(Start)
 }

@@ -61,6 +61,10 @@ type noopVCursor struct {
 	inTx bool
 }
 
+func (t *noopVCursor) GetExecutionMetrics() *Metrics {
+	panic("implement me")
+}
+
 func (t *noopVCursor) SetExecQueryTimeout(timeout *int) {
 	panic("implement me")
 }
@@ -321,6 +325,8 @@ func (t *noopVCursor) SetClientFoundRows(context.Context, bool) error {
 func (t *noopVCursor) SetQueryTimeout(maxExecutionTime int64) {
 }
 
+func (t *noopVCursor) SetTransactionTimeout(timeout int64) {}
+
 func (t *noopVCursor) SetSkipQueryPlanCache(context.Context, bool) error {
 	panic("implement me")
 }
@@ -473,6 +479,12 @@ type loggingVCursor struct {
 	onStreamExecuteMultiFn  func(context.Context, Primitive, string, []*srvtopo.ResolvedShard, []map[string]*querypb.BindVariable, bool, bool, func(*sqltypes.Result) error)
 	onRecordMirrorStatsFn   func(time.Duration, time.Duration, error)
 	onResolveDestinationsFn func(context.Context)
+
+	metrics *Metrics
+}
+
+func (f *loggingVCursor) GetExecutionMetrics() *Metrics {
+	return f.metrics
 }
 
 func (f *loggingVCursor) HasCreatedTempTable() {

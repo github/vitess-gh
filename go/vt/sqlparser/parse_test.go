@@ -1264,13 +1264,31 @@ var (
 	}, {
 		input: "insert /* multi-value list */ into a values (1, 2), (3, 4)",
 	}, {
-		input: "insert /* no values */ into a values ()",
+		input:  "insert /* simple */ into a value (1)",
+		output: "insert /* simple */ into a values (1)",
+	}, {
+		input:  "insert /* a.b */ into a.b value (1)",
+		output: "insert /* a.b */ into a.b values (1)",
+	}, {
+		input:  "insert /* multi-value */ into a value (1, 2)",
+		output: "insert /* multi-value */ into a values (1, 2)",
+	}, {
+		input:  "insert /* multi-value list */ into a value (1, 2), (3, 4)",
+		output: "insert /* multi-value list */ into a values (1, 2), (3, 4)",
+	}, {
+		input:  "insert /* no values */ into a value ()",
+		output: "insert /* no values */ into a values ()",
 	}, {
 		input:  "insert /* set */ into a set a = 1, b = 2",
 		output: "insert /* set */ into a(a, b) values (1, 2)",
 	}, {
 		input:  "insert /* set default */ into a set a = default, b = 2",
 		output: "insert /* set default */ into a(a, b) values (default, 2)",
+	}, {
+		input: "replace into a values (1, 2), (3, 4)",
+	}, {
+		input:  "replace into a value (1, 2), (3, 4)",
+		output: "replace into a values (1, 2), (3, 4)",
 	}, {
 		input: "insert /* value expression list */ into a values (a + 1, 2 * 3)",
 	}, {
@@ -1433,6 +1451,9 @@ var (
 	}, {
 		input:  "set names utf8 collate 'foo'",
 		output: "set names 'utf8'",
+	}, {
+		input:  "set names binary",
+		output: "set names 'binary'",
 	}, {
 		input:  "set character set utf8",
 		output: "set charset 'utf8'",
@@ -2146,14 +2167,14 @@ var (
 		input:  "create procedure DeclareAndIfProcedure(in input_value int) begin declare message varchar(50); if input_value > 100 then set message = 'High'; elseif input_value > 50 then set message = 'Medium'; else set message = 'Low'; end if; select message; end;",
 		output: "create procedure DeclareAndIfProcedure (in input_value int) begin declare message varchar(50); if input_value > 100 then set message = 'High'; elseif input_value > 50 then set message = 'Medium'; else set message = 'Low'; end if; select message from dual; end;",
 	}, {
-		input:  "create procedure NestedIfProcedure(in value int) begin if value > 0 then if value > 100 then select 'Very High'; else select 'High'; end if; else select 'Low or Negative'; end if; end;",
-		output: "create procedure NestedIfProcedure (in value int) begin if value > 0 then if value > 100 then select 'Very High' from dual; else select 'High' from dual; end if; else select 'Low or Negative' from dual; end if; end;",
+		input:  "create procedure NestedIfProcedure(in test_value int) begin if test_value > 0 then if test_value > 100 then select 'Very High'; else select 'High'; end if; else select 'Low or Negative'; end if; end;",
+		output: "create procedure NestedIfProcedure (in test_value int) begin if test_value > 0 then if test_value > 100 then select 'Very High' from dual; else select 'High' from dual; end if; else select 'Low or Negative' from dual; end if; end;",
 	}, {
 		input:  "create procedure MultipleDeclareProcedure(in val1 int, in val2 int) begin declare sum_result int; declare diff_result int; set sum_result = val1 + val2; set diff_result = val1 - val2; select sum_result as Sum, diff_result as Difference; end;",
 		output: "create procedure MultipleDeclareProcedure (in val1 int, in val2 int) begin declare sum_result int; declare diff_result int; set sum_result = val1 + val2; set diff_result = val1 - val2; select sum_result as `Sum`, diff_result as Difference from dual; end;",
 	}, {
-		input:  "create procedure ErrorHandlingProcedure(in value int) begin declare exit handler for sqlexception begin select 'An error occurred'; end; if value < 0 then signal sqlstate '45000' set message_text = 'Negative values not allowed'; else select 'Valid value'; end if; end;",
-		output: "create procedure ErrorHandlingProcedure (in value int) begin declare exit handler for sqlexception begin select 'An error occurred' from dual; end; if value < 0 then signal sqlstate '45000' set message_text = 'Negative values not allowed'; else select 'Valid value' from dual; end if; end;",
+		input:  "create procedure ErrorHandlingProcedure(in test_value int) begin declare exit handler for sqlexception begin select 'An error occurred'; end; if test_value < 0 then signal sqlstate '45000' set message_text = 'Negative values not allowed'; else select 'Valid value'; end if; end;",
+		output: "create procedure ErrorHandlingProcedure (in test_value int) begin declare exit handler for sqlexception begin select 'An error occurred' from dual; end; if test_value < 0 then signal sqlstate '45000' set message_text = 'Negative values not allowed'; else select 'Valid value' from dual; end if; end;",
 	}, {
 		input:  "create procedure HandlerWithSQLEXCEPTION() begin declare undo handler for sqlexception begin select 'SQL Exception occurred'; end; insert into non_existing_table values (1); end;",
 		output: "create procedure HandlerWithSQLEXCEPTION () begin declare undo handler for sqlexception begin select 'SQL Exception occurred' from dual; end; insert into non_existing_table values (1); end;",
@@ -2566,7 +2587,15 @@ var (
 	}, {
 		input: "alter vitess_migration '9748c3b7_7fdb_11eb_ac2c_f875a4d24e90' complete",
 	}, {
+		input: "alter vitess_migration '9748c3b7_7fdb_11eb_ac2c_f875a4d24e90' complete vitess_shards '-40'",
+	}, {
+		input: "alter vitess_migration '9748c3b7_7fdb_11eb_ac2c_f875a4d24e90' complete vitess_shards '-40,40-80'",
+	}, {
 		input: "alter vitess_migration complete all",
+	}, {
+		input: "alter vitess_migration '9748c3b7_7fdb_11eb_ac2c_f875a4d24e90' postpone complete",
+	}, {
+		input: "alter vitess_migration postpone complete all",
 	}, {
 		input: "alter vitess_migration '9748c3b7_7fdb_11eb_ac2c_f875a4d24e90' cancel",
 	}, {
@@ -6158,6 +6187,117 @@ func TestCreateTableLike(t *testing.T) {
 	}
 }
 
+func TestCreateTableSelect(t *testing.T) {
+	testCases := []struct {
+		input  string
+		output string
+	}{
+		{
+			"create table t2 select * from t1",
+			"create table t2 as select * from t1",
+		},
+		{
+			"create table t2 as select * from t1",
+			"create table t2 as select * from t1",
+		},
+		{
+			"create table t2(id int) select * from t1",
+			"create table t2 (\n\tid int\n) as select * from t1",
+		},
+		{
+			"create table t2(id int) as select * from t1",
+			"create table t2 (\n\tid int\n) as select * from t1",
+		},
+		{
+			"create table t2(id int) (select * from t1)",
+			"create table t2 (\n\tid int\n) as select * from t1",
+		},
+		{
+			"create table t2(id int) as (select * from t1)",
+			"create table t2 (\n\tid int\n) as select * from t1",
+		},
+		{
+			"create table t2(id int auto_increment, name varchar(255), primary key(id), unique key by_name(name)) select * from t1",
+			"create table t2 (\n\tid int auto_increment,\n\t`name` varchar(255),\n\tprimary key (id),\n\tunique key by_name (`name`)\n) as select * from t1",
+		},
+		{
+			"create table ks.t2 as select id, name from unsharded_ks.t1",
+			"create table ks.t2 as select id, `name` from unsharded_ks.t1",
+		},
+		{
+			"create table ks.t2(id int, name varchar(255)) select id, name from unsharded_ks.t1",
+			"create table ks.t2 (\n\tid int,\n\t`name` varchar(255)\n) as select id, `name` from unsharded_ks.t1",
+		},
+		{
+			"create table if not exists t2(id int) select * from t1",
+			"create table if not exists t2 (\n\tid int\n) as select * from t1",
+		},
+		{
+			"create table t2 as select id, count(*) as count from t1 group by id having count >= 1",
+			"create table t2 as select id, count(*) as `count` from t1 group by id having `count` >= 1",
+		},
+		{
+			"create table t3 as select t1.id, t2.name from t1 join t2 on t1.id = t2.id where t1.id > 10 order by t1.id limit 10",
+			"create table t3 as select t1.id, t2.`name` from t1 join t2 on t1.id = t2.id where t1.id > 10 order by t1.id asc limit 10",
+		},
+		// temporary table
+		{
+			"create temporary table t2 select id from t1",
+			"create temporary table t2 as select id from t1",
+		},
+		{
+			"create temporary table t2 as select id from t1",
+			"create temporary table t2 as select id from t1",
+		},
+		{
+			"create temporary table t2(id int) select id from t1",
+			"create temporary table t2 (\n\tid int\n) as select id from t1",
+		},
+		{
+			"create temporary table t2(id int) as select id from t1",
+			"create temporary table t2 (\n\tid int\n) as select id from t1",
+		},
+		// with table_options and partition_options
+		{
+			`create table t2(id int) engine=innodb default charset=utf8mb4 collate=utf8mb4_bin 
+partition by range (id) (partition p0 values less than (100), partition p1 values less than (200), partition p2 values less than (300), partition p3 values less than maxvalue) 
+as select * from t1`,
+			`create table t2 (
+	id int
+) engine innodb,
+  charset utf8mb4,
+  collate utf8mb4_bin
+partition by range (id)
+(partition p0 values less than (100),
+ partition p1 values less than (200),
+ partition p2 values less than (300),
+ partition p3 values less than maxvalue) as select * from t1`,
+		},
+		// with ignore or replace
+		{
+			"create table t2(id int unique key) ignore as select * from t1",
+			"create table t2 (\n\tid int unique key\n) ignore as select * from t1",
+		},
+		{
+			"create table t2 replace select * from t1",
+			"create table t2 replace as select * from t1",
+		},
+	}
+	parser := NewTestParser()
+	for _, tcase := range testCases {
+		tree, err := parser.ParseStrictDDL(tcase.input)
+		if err != nil {
+			t.Errorf("input: %s, err: %v", tcase.input, err)
+			continue
+		}
+		assert.True(t, tree.(*CreateTable).FullyParsed)
+		assert.NotNil(t, tree.(*CreateTable).Select, "Select field should not be nil")
+		if got, want := String(tree.(*CreateTable)), tcase.output; got != want {
+			t.Errorf("Parse(%s):\n%s, want\n%s", tcase.input, got, want)
+		}
+	}
+}
+
 func TestCreateTableEscaped(t *testing.T) {
 	testCases := []struct {
 		input  string
@@ -6667,8 +6807,8 @@ func TestParseMultipleEdgeCases(t *testing.T) {
 		want:  []string{"set charset ';'", "select 1 from a"},
 	}, {
 		name:    "Partial DDL",
-		input:   "create table a ignore me this is garbage; select 1 from a",
-		wantErr: "syntax error at position 22 near 'ignore'",
+		input:   "create table a disregard me this is garbage; select 1 from a",
+		wantErr: "syntax error at position 25 near 'disregard'",
 	}}
 	parser := NewTestParser()
 	for _, test := range tests {

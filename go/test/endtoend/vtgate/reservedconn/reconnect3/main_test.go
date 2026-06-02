@@ -82,10 +82,11 @@ func TestMysqlDownServingChange(t *testing.T) {
 	utils.Exec(t, conn, "set default_week_format = 1")
 	_ = utils.Exec(t, conn, "select /*vt+ PLANNER=gen4 */ * from test")
 
-	// Disable VTOrc recoveries to prevent VTOrc from racing with the manual ERS below.
-	clusterInstance.DisableVTOrcRecoveries(t)
+	// Disable VTOrc emergency reparents to prevent VTOrc from racing with the manual ERS below.
+	_, err = clusterInstance.VtctldClientProcess.ExecuteCommandWithOutput("SetVtorcEmergencyReparent", "--disable", keyspaceName)
+	require.NoError(t, err)
 	t.Cleanup(func() {
-		clusterInstance.EnableVTOrcRecoveries(t)
+		_, _ = clusterInstance.VtctldClientProcess.ExecuteCommandWithOutput("SetVtorcEmergencyReparent", "--enable", keyspaceName)
 	})
 
 	primaryTablet := clusterInstance.Keyspaces[0].Shards[0].PrimaryTablet()

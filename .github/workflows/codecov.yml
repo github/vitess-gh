@@ -17,9 +17,9 @@ permissions: read-all
 
 jobs:
   test:
-    if: github.repository == 'vitessio/vitess' && (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'Backport'))
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'Backport')
     name: Code Coverage
-    runs-on: oracle-vm-8cpu-32gb-x86-64
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-8cpu-32gb-x86-64' || 'ubuntu-24.04' }}
 
     steps:
     - name: Check out code
@@ -106,7 +106,7 @@ jobs:
       if: steps.mode.outputs.is_full_run == 'true' || (steps.changes.outputs.changed_files == 'true' && steps.packages.outputs.packages != '')
       uses: ./.github/actions/setup-mysql
       with:
-        flavor: mysql-8.0
+        flavor: mysql-8.4
 
     - name: Get dependencies
       if: steps.mode.outputs.is_full_run == 'true' || (steps.changes.outputs.changed_files == 'true' && steps.packages.outputs.packages != '')

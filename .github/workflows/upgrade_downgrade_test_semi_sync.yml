@@ -18,7 +18,7 @@ jobs:
   upgrade_downgrade_test_e2e:
     timeout-minutes: 60
     name: Run Semi Sync Upgrade Downgrade Test
-    runs-on: ${{ github.repository == 'vitessio/vitess' && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-16cpu-64gb-x86-64' || 'ubuntu-24.04' }}
 
     steps:
       - name: Skip CI
@@ -75,7 +75,7 @@ jobs:
         if: steps.changes.outputs.end_to_end == 'true'
         uses: ./.github/actions/setup-mysql
         with:
-          flavor: mysql-8.0
+          flavor: mysql-8.4
 
       - name: Get base dependencies
         timeout-minutes: 10

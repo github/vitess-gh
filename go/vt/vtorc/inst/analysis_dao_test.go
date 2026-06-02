@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/patrickmn/go-cache"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"vitess.io/vitess/go/vt/external/golib/sqlutils"
@@ -30,20 +31,22 @@ import (
 	"vitess.io/vitess/go/vt/vtorc/test"
 )
 
-// The initialSQL is a set of insert commands copied from a dump of an actual running VTOrc instances. The relevant insert commands are here.
-// This is a dump taken from a test running 4 tablets, zone1-101 is the primary, zone1-100 is a replica, zone1-112 is a rdonly and zone2-200 is a cross-cell replica.
-var initialSQL = []string{
-	`INSERT INTO database_instance VALUES('zone1-0000000112','localhost',6747,3,'2022-12-28 07:26:04','2022-12-28 07:26:04',213696377,'8.0.31','ROW',1,1,'vt-0000000112-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000112-relay-bin.000002',15815,1,0,'zone1','',0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a5138-8680-11ed-9240-92a06c3be3c2','2022-12-28 07:26:04','',1,0,0,'Homebrew','8.0','FULL',10816929,0,0,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a5138-8680-11ed-9240-92a06c3be3c2',1,1,'',1000000000000000000,1,0,0,0,false,false);`,
-	`INSERT INTO database_instance VALUES('zone1-0000000100','localhost',6711,2,'2022-12-28 07:26:04','2022-12-28 07:26:04',1094500338,'8.0.31','ROW',1,1,'vt-0000000100-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000100-relay-bin.000002',15815,1,0,'zone1','',0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a5138-8680-11ed-acf8-d6b0ef9f4eaa','2022-12-28 07:26:04','',1,0,0,'Homebrew','8.0','FULL',10103920,0,1,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a5138-8680-11ed-acf8-d6b0ef9f4eaa',1,1,'',1000000000000000000,1,0,1,0,false,false);`,
-	`INSERT INTO database_instance VALUES('zone1-0000000101','localhost',6714,1,'2022-12-28 07:26:04','2022-12-28 07:26:04',390954723,'8.0.31','ROW',1,1,'vt-0000000101-bin.000001',15583,'',0,0,0,0,0,'',0,'',0,NULL,NULL,0,'','',0,'',0,0,0,'zone1','',0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a4cc4-8680-11ed-a104-47706090afbd','2022-12-28 07:26:04','',0,0,0,'Homebrew','8.0','FULL',11366095,1,1,'ON',1,'','','729a4cc4-8680-11ed-a104-47706090afbd',-1,-1,'',1000000000000000000,1,1,0,2,false,false);`,
-	`INSERT INTO database_instance VALUES('zone2-0000000200','localhost',6756,2,'2022-12-28 07:26:05','2022-12-28 07:26:05',444286571,'8.0.31','ROW',1,1,'vt-0000000200-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000200-relay-bin.000002',15815,1,0,'zone2','',0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a497c-8680-11ed-8ad4-3f51d747db75','2022-12-28 07:26:05','',1,0,0,'Homebrew','8.0','FULL',10443112,0,1,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a497c-8680-11ed-8ad4-3f51d747db75',1,1,'',1000000000000000000,1,0,1,0,false,false);`,
-	`INSERT INTO vitess_tablet VALUES('zone1-0000000100','localhost',6711,'ks','0','zone1',2,'0001-01-01 00:00:00+00:00',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3130307d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363731307d20706f72745f6d61703a7b6b65793a227674222076616c75653a363730397d206b657973706163653a226b73222073686172643a22302220747970653a5245504c494341206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363731312064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
-	`INSERT INTO vitess_tablet VALUES('zone1-0000000101','localhost',6714,'ks','0','zone1',1,'2022-12-28 07:23:25.129898+00:00',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3130317d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363731337d20706f72745f6d61703a7b6b65793a227674222076616c75653a363731327d206b657973706163653a226b73222073686172643a22302220747970653a5052494d415259206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a36373134207072696d6172795f7465726d5f73746172745f74696d653a7b7365636f6e64733a31363732323132323035206e616e6f7365636f6e64733a3132393839383030307d2064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
-	`INSERT INTO vitess_tablet VALUES('zone1-0000000112','localhost',6747,'ks','0','zone1',3,'0001-01-01 00:00:00+00:00',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3131327d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363734367d20706f72745f6d61703a7b6b65793a227674222076616c75653a363734357d206b657973706163653a226b73222073686172643a22302220747970653a52444f4e4c59206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363734372064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
-	`INSERT INTO vitess_tablet VALUES('zone2-0000000200','localhost',6756,'ks','0','zone2',2,'0001-01-01 00:00:00+00:00',X'616c6961733a7b63656c6c3a227a6f6e653222207569643a3230307d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363735357d20706f72745f6d61703a7b6b65793a227674222076616c75653a363735347d206b657973706163653a226b73222073686172643a22302220747970653a5245504c494341206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363735362064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
-	`INSERT INTO vitess_shard VALUES('ks','0','zone1-0000000101','2022-12-28 07:23:25.129898+00:00');`,
-	`INSERT INTO vitess_keyspace VALUES('ks',0,'semi_sync');`,
-}
+var (
+	// The initialSQL is a set of insert commands copied from a dump of an actual running VTOrc instances. The relevant insert commands are here.
+	// This is a dump taken from a test running 4 tablets, zone1-101 is the primary, zone1-100 is a replica, zone1-112 is a rdonly and zone2-200 is a cross-cell replica.
+	initialSQL = []string{
+		`INSERT INTO database_instance VALUES('zone1-0000000112','localhost',6747,3,'zone1','2022-12-28 07:26:04','2022-12-28 07:26:04',213696377,'8.0.31','ROW',1,1,'vt-0000000112-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000112-relay-bin.000002',15815,1,0,0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a5138-8680-11ed-9240-92a06c3be3c2','2022-12-28 07:26:04','',1,0,0,'Homebrew','8.0','FULL',10816929,0,0,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a5138-8680-11ed-9240-92a06c3be3c2',1,1,1000000000000000000,1,0,0,0,false,false);`,
+		`INSERT INTO database_instance VALUES('zone1-0000000100','localhost',6711,2,'zone1','2022-12-28 07:26:04','2022-12-28 07:26:04',1094500338,'8.0.31','ROW',1,1,'vt-0000000100-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000100-relay-bin.000002',15815,1,0,0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a5138-8680-11ed-acf8-d6b0ef9f4eaa','2022-12-28 07:26:04','',1,0,0,'Homebrew','8.0','FULL',10103920,0,1,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a5138-8680-11ed-acf8-d6b0ef9f4eaa',1,1,1000000000000000000,1,0,1,0,false,false);`,
+		`INSERT INTO database_instance VALUES('zone1-0000000101','localhost',6714,1,'zone1','2022-12-28 07:26:04','2022-12-28 07:26:04',390954723,'8.0.31','ROW',1,1,'vt-0000000101-bin.000001',15583,'',0,0,0,0,0,'',0,'',0,NULL,NULL,0,'','',0,'',0,0,0,0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a4cc4-8680-11ed-a104-47706090afbd','2022-12-28 07:26:04','',0,0,0,'Homebrew','8.0','FULL',11366095,1,1,'ON',1,'','','729a4cc4-8680-11ed-a104-47706090afbd',-1,-1,1000000000000000000,1,1,0,2,false,false);`,
+		`INSERT INTO database_instance VALUES('zone2-0000000200','localhost',6756,2,'zone2','2022-12-28 07:26:05','2022-12-28 07:26:05',444286571,'8.0.31','ROW',1,1,'vt-0000000200-bin.000001',15963,'localhost',6714,8,4.0,1,1,'vt-0000000101-bin.000001',15583,'vt-0000000101-bin.000001',15583,0,0,1,'','',1,'vt-0000000200-relay-bin.000002',15815,1,0,0,0,0,1,'729a4cc4-8680-11ed-a104-47706090afbd:1-54','729a497c-8680-11ed-8ad4-3f51d747db75','2022-12-28 07:26:05','',1,0,0,'Homebrew','8.0','FULL',10443112,0,1,'ON',1,'729a4cc4-8680-11ed-a104-47706090afbd','','729a4cc4-8680-11ed-a104-47706090afbd,729a497c-8680-11ed-8ad4-3f51d747db75',1,1,1000000000000000000,1,0,1,0,false,false);`,
+		`INSERT INTO vitess_tablet VALUES('zone1-0000000100','localhost',6711,'ks','0','zone1',2,'0001-01-01 00:00:00 +0000 UTC',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3130307d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363731307d20706f72745f6d61703a7b6b65793a227674222076616c75653a363730397d206b657973706163653a226b73222073686172643a22302220747970653a5245504c494341206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363731312064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
+		`INSERT INTO vitess_tablet VALUES('zone1-0000000101','localhost',6714,'ks','0','zone1',1,'2022-12-28 07:23:25.129898 +0000 UTC',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3130317d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363731337d20706f72745f6d61703a7b6b65793a227674222076616c75653a363731327d206b657973706163653a226b73222073686172643a22302220747970653a5052494d415259206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a36373134207072696d6172795f7465726d5f73746172745f74696d653a7b7365636f6e64733a31363732323132323035206e616e6f7365636f6e64733a3132393839383030307d2064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
+		`INSERT INTO vitess_tablet VALUES('zone1-0000000112','localhost',6747,'ks','0','zone1',3,'0001-01-01 00:00:00 +0000 UTC',X'616c6961733a7b63656c6c3a227a6f6e653122207569643a3131327d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363734367d20706f72745f6d61703a7b6b65793a227674222076616c75653a363734357d206b657973706163653a226b73222073686172643a22302220747970653a52444f4e4c59206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363734372064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
+		`INSERT INTO vitess_tablet VALUES('zone2-0000000200','localhost',6756,'ks','0','zone2',2,'0001-01-01 00:00:00 +0000 UTC',X'616c6961733a7b63656c6c3a227a6f6e653222207569643a3230307d20686f73746e616d653a226c6f63616c686f73742220706f72745f6d61703a7b6b65793a2267727063222076616c75653a363735357d20706f72745f6d61703a7b6b65793a227674222076616c75653a363735347d206b657973706163653a226b73222073686172643a22302220747970653a5245504c494341206d7973716c5f686f73746e616d653a226c6f63616c686f737422206d7973716c5f706f72743a363735362064625f7365727665725f76657273696f6e3a22382e302e3331222064656661756c745f636f6e6e5f636f6c6c6174696f6e3a3435');`,
+		`INSERT INTO vitess_shard VALUES('ks','0','zone1-0000000101','2025-06-25 23:48:57.306096 +0000 UTC',0);`,
+		`INSERT INTO vitess_keyspace VALUES('ks',0,'semi_sync',0);`,
+	}
+)
 
 // TestGetDetectionAnalysisDecision tests the code of GetDetectionAnalysis decision-making. It doesn't check the SQL query
 // run by it. It only checks the analysis part after the rows have been read. This tests fakes the db and explicitly returns the
@@ -75,8 +78,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ClusterHasNoPrimary,
-		},
-		{
+		}, {
 			name: "PrimaryTabletDeleted",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -88,15 +90,14 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 					MysqlHostname: "localhost",
 					MysqlPort:     6709,
 				},
-				ShardPrimaryTermTimestamp: "2022-12-28 07:23:25.129898+00:00",
+				ShardPrimaryTermTimestamp: "2022-12-28 07:23:25.129898 +0000 UTC",
 				DurabilityPolicy:          policy.DurabilityNone,
 				LastCheckValid:            1,
 			}},
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimaryTabletDeleted,
-		},
-		{
+		}, {
 			name: "StalledDiskPrimary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -120,8 +121,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimaryDiskStalled,
-		},
-		{
+		}, {
 			name: "PrimarySemiSyncBlocked",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -150,8 +150,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimarySemiSyncBlocked,
-		},
-		{
+		}, {
 			name: "LockedSemiSync",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -180,8 +179,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     LockedSemiSyncPrimaryHypothesis,
-		},
-		{
+		}, {
 			name: "DeadPrimary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -204,8 +202,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     DeadPrimary,
-		},
-		{
+		}, {
 			name: "DeadPrimaryWithoutReplicas",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -226,8 +223,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     DeadPrimaryWithoutReplicas,
-		},
-		{
+		}, {
 			name: "DeadPrimaryAndReplicas",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -248,8 +244,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     DeadPrimaryAndReplicas,
-		},
-		{
+		}, {
 			name: "DeadPrimaryAndSomeReplicas",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -272,8 +267,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     DeadPrimaryAndSomeReplicas,
-		},
-		{
+		}, {
 			name: "PrimaryHasPrimary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -295,8 +289,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimaryHasPrimary,
-		},
-		{
+		}, {
 			name: "PrimaryIsReadOnly",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -319,8 +312,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimaryIsReadOnly,
-		},
-		{
+		}, {
 			name: "PrimaryCurrentTypeMismatch",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -342,8 +334,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimaryCurrentTypeMismatch,
-		},
-		{
+		}, {
 			name: "Unknown tablet type shouldn't run the mismatch recovery analysis",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -368,8 +359,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     NoProblem,
-		},
-		{
+		}, {
 			name: "PrimarySemiSyncMustNotBeSet",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -392,8 +382,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimarySemiSyncMustNotBeSet,
-		},
-		{
+		}, {
 			name: "PrimarySemiSyncMustBeSet",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -418,8 +407,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     PrimarySemiSyncMustBeSet,
-		},
-		{
+		}, {
 			name: "NotConnectedToPrimary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -457,8 +445,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     NotConnectedToPrimary,
-		},
-		{
+		}, {
 			name: "ReplicaIsWritable",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -499,8 +486,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ReplicaIsWritable,
-		},
-		{
+		}, {
 			name: "ConnectedToWrongPrimary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -541,8 +527,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ConnectedToWrongPrimary,
-		},
-		{
+		}, {
 			name: "ReplicationStopped",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -584,8 +569,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ReplicationStopped,
-		},
-		{
+		}, {
 			name: "No recoveries on drained tablets",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -627,8 +611,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     NoProblem,
-		},
-		{
+		}, {
 			name: "ReplicaMisconfigured",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -715,8 +698,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ReplicaSemiSyncMustBeSet,
-		},
-		{
+		}, {
 			name: "ReplicaSemiSyncMustNotBeSet",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -758,8 +740,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ReplicaSemiSyncMustNotBeSet,
-		},
-		{
+		}, {
 			name: "SnapshotKeyspace",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -779,8 +760,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     NoProblem,
-		},
-		{
+		}, {
 			name: "EmptyDurabilityPolicy",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -798,8 +778,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     NoProblem,
-		},
-		{
+		}, {
 			// If the database_instance table for a tablet is empty (discovery of MySQL information hasn't happened yet or failed)
 			// then we shouldn't run a failure fix on it until the discovery succeeds
 			name: "Empty database_instance table",
@@ -839,8 +818,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     InvalidReplica,
-		},
-		{
+		}, {
 			name: "DeadPrimary when VTOrc is starting up",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -882,8 +860,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     DeadPrimary,
-		},
-		{
+		}, {
 			name: "Invalid Primary",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -901,8 +878,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     InvalidPrimary,
-		},
-		{
+		}, {
 			name: "ErrantGTID",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -944,8 +920,7 @@ func TestGetDetectionAnalysisDecision(t *testing.T) {
 			keyspaceWanted: "ks",
 			shardWanted:    "0",
 			codeWanted:     ErrantGTIDDetected,
-		},
-		{
+		}, {
 			name: "ErrantGTID on a non-replica",
 			info: []*test.InfoForRecoveryAnalysis{{
 				TabletInfo: &topodatapb.Tablet{
@@ -1275,19 +1250,14 @@ func TestAuditInstanceAnalysisInChangelog(t *testing.T) {
 
 // TestPostProcessAnalyses tests the functionality of the postProcessAnalyses function.
 func TestPostProcessAnalyses(t *testing.T) {
-	ks0 := ClusterInfo{
-		Keyspace: "ks",
-		Shard:    "0",
-	}
-	ks80 := ClusterInfo{
-		Keyspace: "ks",
-		Shard:    "80-",
-	}
+	keyspace := "ks"
+	shard0 := "0"
+	shard80 := "80-"
 	clusters := map[string]*clusterAnalysis{
-		getKeyspaceShardName(ks0.Keyspace, ks0.Shard): {
+		getKeyspaceShardName(keyspace, shard0): {
 			totalTablets: 4,
 		},
-		getKeyspaceShardName(ks80.Keyspace, ks80.Shard): {
+		getKeyspaceShardName(keyspace, shard80): {
 			totalTablets: 3,
 		},
 	}
@@ -1301,83 +1271,94 @@ func TestPostProcessAnalyses(t *testing.T) {
 			name: "No processing needed",
 			analyses: []*DetectionAnalysis{
 				{
-					Analysis:       ReplicationStopped,
-					TabletType:     topodatapb.TabletType_REPLICA,
-					LastCheckValid: true,
-					ClusterDetails: ks0,
+					Analysis:         ReplicationStopped,
+					AnalyzedKeyspace: keyspace,
+					AnalyzedShard:    shard0,
+					TabletType:       topodatapb.TabletType_REPLICA,
+					LastCheckValid:   true,
 				}, {
-					Analysis:       ReplicaSemiSyncMustBeSet,
-					LastCheckValid: true,
-					TabletType:     topodatapb.TabletType_REPLICA,
-					ClusterDetails: ks0,
+					Analysis:         ReplicaSemiSyncMustBeSet,
+					AnalyzedKeyspace: keyspace,
+					AnalyzedShard:    shard0,
+					LastCheckValid:   true,
+					TabletType:       topodatapb.TabletType_REPLICA,
 				}, {
-					Analysis:       PrimaryHasPrimary,
-					LastCheckValid: true,
-					TabletType:     topodatapb.TabletType_REPLICA,
-					ClusterDetails: ks0,
+					Analysis:         PrimaryHasPrimary,
+					AnalyzedKeyspace: keyspace,
+					AnalyzedShard:    shard0,
+					LastCheckValid:   true,
+					TabletType:       topodatapb.TabletType_REPLICA,
 				},
 			},
-		},
-		{
+		}, {
 			name: "Conversion of InvalidPrimary to DeadPrimary",
 			analyses: []*DetectionAnalysis{
 				{
 					Analysis:              InvalidPrimary,
 					AnalyzedInstanceAlias: "zone1-100",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_PRIMARY,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              NoProblem,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-202",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					TabletType:            topodatapb.TabletType_RDONLY,
-					ClusterDetails:        ks80,
 				}, {
 					Analysis:              ConnectedToWrongPrimary,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-101",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_REPLICA,
 					ReplicationStopped:    true,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              ReplicationStopped,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-102",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_RDONLY,
 					ReplicationStopped:    true,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              InvalidReplica,
 					AnalyzedInstanceAlias: "zone1-108",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_REPLICA,
 					LastCheckValid:        false,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              NoProblem,
 					AnalyzedInstanceAlias: "zone1-302",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					LastCheckValid:        true,
 					TabletType:            topodatapb.TabletType_REPLICA,
-					ClusterDetails:        ks80,
 				},
 			},
 			want: []*DetectionAnalysis{
 				{
 					Analysis:              DeadPrimary,
 					AnalyzedInstanceAlias: "zone1-100",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_PRIMARY,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              NoProblem,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-202",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					TabletType:            topodatapb.TabletType_RDONLY,
-					ClusterDetails:        ks80,
 				}, {
 					Analysis:              NoProblem,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-302",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					TabletType:            topodatapb.TabletType_REPLICA,
-					ClusterDetails:        ks80,
 				},
 			},
 		},
@@ -1387,33 +1368,38 @@ func TestPostProcessAnalyses(t *testing.T) {
 				{
 					Analysis:              InvalidPrimary,
 					AnalyzedInstanceAlias: "zone1-100",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_PRIMARY,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              NoProblem,
 					AnalyzedInstanceAlias: "zone1-202",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					LastCheckValid:        true,
 					TabletType:            topodatapb.TabletType_RDONLY,
-					ClusterDetails:        ks80,
 				}, {
 					Analysis:              NoProblem,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-101",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_REPLICA,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              ReplicationStopped,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-102",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard0,
 					TabletType:            topodatapb.TabletType_RDONLY,
 					ReplicationStopped:    true,
-					ClusterDetails:        ks0,
 				}, {
 					Analysis:              NoProblem,
 					LastCheckValid:        true,
 					AnalyzedInstanceAlias: "zone1-302",
+					AnalyzedKeyspace:      keyspace,
+					AnalyzedShard:         shard80,
 					TabletType:            topodatapb.TabletType_REPLICA,
-					ClusterDetails:        ks80,
 				},
 			},
 		},
@@ -1425,6 +1411,104 @@ func TestPostProcessAnalyses(t *testing.T) {
 			}
 			result := postProcessAnalyses(tt.analyses, clusters)
 			require.ElementsMatch(t, tt.want, result)
+		})
+	}
+}
+
+func TestDeclaresBefore(t *testing.T) {
+	tests := []struct {
+		name     string
+		problem  *DetectionAnalysisProblem
+		code     AnalysisCode
+		expected bool
+	}{
+		{
+			name:     "ReplicationStopped declares before PrimarySemiSyncBlocked",
+			problem:  GetDetectionAnalysisProblem(ReplicationStopped),
+			code:     PrimarySemiSyncBlocked,
+			expected: true,
+		},
+		{
+			name:     "ReplicationStopped does not declare before DeadPrimary",
+			problem:  GetDetectionAnalysisProblem(ReplicationStopped),
+			code:     DeadPrimary,
+			expected: false,
+		},
+		{
+			name:     "PrimaryIsReadOnly declares before PrimarySemiSyncBlocked",
+			problem:  GetDetectionAnalysisProblem(PrimaryIsReadOnly),
+			code:     PrimarySemiSyncBlocked,
+			expected: true,
+		},
+		{
+			name:     "PrimaryIsReadOnly does not declare before PrimaryDiskStalled",
+			problem:  GetDetectionAnalysisProblem(PrimaryIsReadOnly),
+			code:     PrimaryDiskStalled,
+			expected: false,
+		},
+		{
+			name:     "ReplicationStopped does not declare before PrimaryDiskStalled",
+			problem:  GetDetectionAnalysisProblem(ReplicationStopped),
+			code:     PrimaryDiskStalled,
+			expected: false,
+		},
+		{
+			name:     "problem with no BeforeAnalyses",
+			problem:  GetDetectionAnalysisProblem(NotConnectedToPrimary),
+			code:     PrimarySemiSyncBlocked,
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, declaresBefore(tt.problem, tt.code))
+		})
+	}
+}
+
+func TestDeclaresAfter(t *testing.T) {
+	tests := []struct {
+		name             string
+		shardWideProblem *DetectionAnalysisProblem
+		code             AnalysisCode
+		expected         bool
+	}{
+		{
+			name: "shard-wide problem with AfterAnalyses referencing suppressed code",
+			shardWideProblem: &DetectionAnalysisProblem{
+				Meta: &DetectionAnalysisProblemMeta{
+					Analysis:    PrimarySemiSyncBlocked,
+					Description: "test shard-wide",
+					Priority:    detectionAnalysisPriorityShardWideAction,
+				},
+				AfterAnalyses: []AnalysisCode{ReplicationStopped},
+			},
+			code:     ReplicationStopped,
+			expected: true,
+		},
+		{
+			name: "shard-wide problem with AfterAnalyses not referencing suppressed code",
+			shardWideProblem: &DetectionAnalysisProblem{
+				Meta: &DetectionAnalysisProblemMeta{
+					Analysis:    PrimarySemiSyncBlocked,
+					Description: "test shard-wide",
+					Priority:    detectionAnalysisPriorityShardWideAction,
+				},
+				AfterAnalyses: []AnalysisCode{ReplicationStopped},
+			},
+			code:     NotConnectedToPrimary,
+			expected: false,
+		},
+		{
+			name:             "shard-wide problem with no AfterAnalyses",
+			shardWideProblem: GetDetectionAnalysisProblem(PrimarySemiSyncBlocked),
+			code:             ReplicationStopped,
+			expected:         false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, declaresAfter(tt.shardWideProblem, tt.code))
 		})
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/test/endtoend/utils"
 	"vitess.io/vitess/go/vt/sqlparser"
+	vtutils "vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/vtgate/engine"
 	"vitess.io/vitess/go/vt/vtgate/planbuilder"
 )
@@ -86,8 +87,8 @@ func TestMain(m *testing.M) {
 
 		// TODO: (@GuptaManan100/@systay): Also run the tests with normalizer on.
 		clusterInstance.VtGateExtraArgs = append(clusterInstance.VtGateExtraArgs,
-			"--normalize_queries=false",
-			"--schema_change_signal=true",
+			vtutils.GetFlagVariantForTests("--normalize-queries")+"=false",
+			vtutils.GetFlagVariantForTests("--schema-change-signal")+"=true",
 		)
 
 		// Start vtgate

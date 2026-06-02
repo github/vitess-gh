@@ -21,15 +21,18 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"vitess.io/vitess/go/mysql/replication"
 	logutilpb "vitess.io/vitess/go/vt/proto/logutil"
 	"vitess.io/vitess/go/vt/vtctl/reparentutil/policy"
 	"vitess.io/vitess/go/vt/vttablet/tmclient"
+	tmcmock "vitess.io/vitess/go/vt/vttablet/tmclient/mock"
 
 	"vitess.io/vitess/go/mysql"
 	"vitess.io/vitess/go/sets"
@@ -1865,11 +1868,84 @@ func TestEmergencyReparenter_reparentShardLocked(t *testing.T) {
 			shouldErr:        true,
 			errShouldContain: "primary zone1-0000000100 is not equal to expected alias zone1-0000000101",
 		},
+		{
+			// Regression test: if every candidate has mutually errant GTIDs, findErrantGTIDs
+			// returns an empty map, which previously caused findMostAdvanced to panic with
+			// "index out of range [0] with length 0" when indexing the empty tablet slice.
+			name:                 "all candidates filtered out by errant GTID detection",
+			durability:           policy.DurabilityNone,
+			emergencyReparentOps: EmergencyReparentOptions{},
+			tmc: &testutil.TabletManagerClient{
+				ReadReparentJournalInfoResults: map[string]int32{
+					"zone1-0000000100": 3,
+					"zone1-0000000101": 3,
+				},
+				StopReplicationAndGetStatusResults: map[string]struct {
+					StopStatus *replicationdatapb.StopReplicationStatus
+					Error      error
+				}{
+					"zone1-0000000100": {
+						StopStatus: &replicationdatapb.StopReplicationStatus{
+							Before: &replicationdatapb.Status{IoState: int32(replication.ReplicationStateRunning), SqlState: int32(replication.ReplicationStateRunning)},
+							After: &replicationdatapb.Status{
+								SourceUuid:       "00000000-0000-0000-0000-000000000001",
+								RelayLogPosition: getRelayLogPosition("1-100", "1-31", "1-50"),
+							},
+						},
+					},
+					"zone1-0000000101": {
+						StopStatus: &replicationdatapb.StopReplicationStatus{
+							Before: &replicationdatapb.Status{IoState: int32(replication.ReplicationStateRunning), SqlState: int32(replication.ReplicationStateRunning)},
+							After: &replicationdatapb.Status{
+								SourceUuid:       "00000000-0000-0000-0000-000000000001",
+								RelayLogPosition: getRelayLogPosition("1-100", "1-30", "1-51"),
+							},
+						},
+					},
+				},
+				WaitForPositionResults: map[string]map[string]error{
+					"zone1-0000000100": {
+						getRelayLogPosition("1-100", "1-31", "1-50"): nil,
+					},
+					"zone1-0000000101": {
+						getRelayLogPosition("1-100", "1-30", "1-51"): nil,
+					},
+				},
+			},
+			shards: []*vtctldatapb.Shard{
+				{
+					Keyspace: "testkeyspace",
+					Name:     "-",
+				},
+			},
+			tablets: []*topodatapb.Tablet{
+				{
+					Alias: &topodatapb.TabletAlias{
+						Cell: "zone1",
+						Uid:  100,
+					},
+					Keyspace: "testkeyspace",
+					Shard:    "-",
+				},
+				{
+					Alias: &topodatapb.TabletAlias{
+						Cell: "zone1",
+						Uid:  101,
+					},
+					Keyspace: "testkeyspace",
+					Shard:    "-",
+				},
+			},
+			keyspace:         "testkeyspace",
+			shard:            "-",
+			cells:            []string{"zone1"},
+			shouldErr:        true,
+			errShouldContain: "no valid candidates for emergency reparent",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -1913,6 +1989,274 @@ func TestEmergencyReparenter_reparentShardLocked(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+// TestEmergencyReparenterRestartsStoppedIOThreadsOnStopReplicationFailure verifies that ERS
+// restarts replication on replicas whose IO threads it stopped when encountering a partial
+// failure in the stop replication phase.
+func TestEmergencyReparenterRestartsStoppedIOThreadsOnStopReplicationFailure(t *testing.T) {
+	ctx := t.Context()
+
+	const (
+		keyspace           = "testkeyspace"
+		shard              = "-"
+		primaryAlias       = "zone1-0000000100"
+		stoppedIOAlias     = "zone1-0000000101"
+		connectingIOAlias  = "zone1-0000000102"
+		failedReplicaAlias = "zone1-0000000103"
+	)
+
+	stoppedIOStatus := &replicationdatapb.StopReplicationStatus{
+		Before: &replicationdatapb.Status{
+			IoState:  int32(replication.ReplicationStateRunning),
+			SqlState: int32(replication.ReplicationStateRunning),
+		},
+		After: &replicationdatapb.Status{},
+	}
+
+	connectingIOStatus := &replicationdatapb.StopReplicationStatus{
+		Before: &replicationdatapb.Status{
+			IoState:     int32(replication.ReplicationStateConnecting),
+			LastIoError: "",
+			SqlState:    int32(replication.ReplicationStateRunning),
+		},
+		After: &replicationdatapb.Status{},
+	}
+
+	mockController := gomock.NewController(t)
+	tmc := tmcmock.NewMockTabletManagerClient(mockController)
+
+	// Simulate the TabletManager RPC sequence for one dead primary, two replicas
+	// whose IO threads ERS stops successfully, and one replica that fails during
+	// the stop-replication phase. That leaves ERS with a partial stop snapshot,
+	// then forces haveRevoked to fail before relay log application begins.
+	tmc.EXPECT().
+		StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(primaryAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+		Return(nil, assert.AnError)
+
+	tmc.EXPECT().
+		StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(stoppedIOAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+		Return(stoppedIOStatus, nil)
+
+	tmc.EXPECT().
+		StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(connectingIOAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+		Return(connectingIOStatus, nil)
+
+	tmc.EXPECT().
+		StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(failedReplicaAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+		Return(nil, assert.AnError)
+
+	// ERS should still restart replication on replicas whose IO threads it
+	// already stopped before stopReplicationAndBuildStatusMaps returned.
+	tmc.EXPECT().
+		StartReplication(gomock.Any(), tabletAliasMatcher(stoppedIOAlias), false).
+		Return(nil).
+		Times(1)
+
+	tmc.EXPECT().
+		StartReplication(gomock.Any(), tabletAliasMatcher(connectingIOAlias), false).
+		Return(nil).
+		Times(1)
+
+	ts := memorytopo.NewServer(ctx, "zone1")
+	defer ts.Close()
+
+	testutil.AddShards(ctx, t, ts, &vtctldatapb.Shard{
+		Keyspace: keyspace,
+		Name:     shard,
+		Shard: &topodatapb.Shard{
+			PrimaryAlias: &topodatapb.TabletAlias{
+				Cell: "zone1",
+				Uid:  100,
+			},
+		},
+	})
+
+	testutil.AddTablets(ctx, t, ts, nil,
+		&topodatapb.Tablet{
+			Alias: &topodatapb.TabletAlias{
+				Cell: "zone1",
+				Uid:  100,
+			},
+			Type:     topodatapb.TabletType_PRIMARY,
+			Keyspace: keyspace,
+			Shard:    shard,
+		},
+		&topodatapb.Tablet{
+			Alias: &topodatapb.TabletAlias{
+				Cell: "zone1",
+				Uid:  101,
+			},
+			Type:     topodatapb.TabletType_REPLICA,
+			Keyspace: keyspace,
+			Shard:    shard,
+		},
+		&topodatapb.Tablet{
+			Alias: &topodatapb.TabletAlias{
+				Cell: "zone1",
+				Uid:  102,
+			},
+			Type:     topodatapb.TabletType_REPLICA,
+			Keyspace: keyspace,
+			Shard:    shard,
+		},
+		&topodatapb.Tablet{
+			Alias: &topodatapb.TabletAlias{
+				Cell: "zone1",
+				Uid:  103,
+			},
+			Type:     topodatapb.TabletType_REPLICA,
+			Keyspace: keyspace,
+			Shard:    shard,
+		},
+	)
+
+	reparenttestutil.SetKeyspaceDurability(ctx, t, ts, keyspace, policy.DurabilityNone)
+
+	erp := NewEmergencyReparenter(ts, tmc, logutil.NewMemoryLogger())
+	_, err := erp.ReparentShard(ctx, keyspace, shard, EmergencyReparentOptions{})
+	require.ErrorContains(t, err, "failed to stop replication and build status maps")
+}
+
+// TestEmergencyReparenterRestartsStoppedIOThreadsOnFailure verifies that ERS
+// restarts replication on replicas whose IO threads it stopped before
+// aborting during relay log application.
+func TestEmergencyReparenterRestartsStoppedIOThreadsOnFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+
+		const (
+			keyspace         = "testkeyspace"
+			shard            = "-"
+			primaryAlias     = "zone1-0000000100"
+			stoppedIOAlias   = "zone1-0000000101"
+			alreadyStoppedIO = "zone1-0000000102"
+			relayLogPosition = "MySQL56/3E11FA47-71CA-11E1-9E33-C80AA9429562:1-21"
+			sourceUUID       = "3E11FA47-71CA-11E1-9E33-C80AA9429562"
+		)
+
+		stoppedIOStatus := &replicationdatapb.StopReplicationStatus{
+			Before: &replicationdatapb.Status{
+				IoState:  int32(replication.ReplicationStateRunning),
+				SqlState: int32(replication.ReplicationStateRunning),
+			},
+			After: &replicationdatapb.Status{
+				SourceUuid:       sourceUUID,
+				RelayLogPosition: relayLogPosition,
+			},
+		}
+
+		alreadyStoppedIOStatus := &replicationdatapb.StopReplicationStatus{
+			Before: &replicationdatapb.Status{
+				IoState:  int32(replication.ReplicationStateStopped),
+				SqlState: int32(replication.ReplicationStateRunning),
+			},
+			After: &replicationdatapb.Status{
+				SourceUuid:       sourceUUID,
+				RelayLogPosition: relayLogPosition,
+			},
+		}
+
+		mockController := gomock.NewController(t)
+		tmc := tmcmock.NewMockTabletManagerClient(mockController)
+
+		// Simulate the TabletManager RPC sequence for one dead primary, one replica whose IO thread
+		// ERS stops, and one replica whose IO thread was already stopped before ERS started.
+		tmc.EXPECT().
+			StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(primaryAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+			Return(nil, assert.AnError)
+
+		tmc.EXPECT().
+			StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(stoppedIOAlias), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+			Return(stoppedIOStatus, nil)
+
+		tmc.EXPECT().
+			StopReplicationAndGetStatus(gomock.Any(), tabletAliasMatcher(alreadyStoppedIO), replicationdatapb.StopReplicationMode_IOTHREADONLY).
+			Return(alreadyStoppedIOStatus, nil)
+
+		// Now simulate a replica that takes too long while applying relay logs.
+		tmc.EXPECT().
+			WaitForPosition(gomock.Any(), tabletAliasMatcher(stoppedIOAlias), relayLogPosition).
+			DoAndReturn(func(ctx context.Context, tablet *topodatapb.Tablet, position string) error {
+				// Block until the context expires so ERS aborts before it starts repointing replicas.
+				<-ctx.Done()
+				return ctx.Err()
+			}).
+			Times(1)
+
+		tmc.EXPECT().
+			WaitForPosition(gomock.Any(), tabletAliasMatcher(alreadyStoppedIO), relayLogPosition).
+			Return(nil).
+			Times(1)
+
+		// We expect the replica whose IO thread was stopped as part of the ERS (and only that replica,
+		// not the one that already had its IO thread stopped) to have replication restarted.
+		tmc.EXPECT().
+			StartReplication(gomock.Any(), tabletAliasMatcher(stoppedIOAlias), false).
+			Return(nil).
+			Times(1)
+
+		// Build the test topology.
+		ts := memorytopo.NewServer(ctx, "zone1")
+		defer ts.Close()
+
+		testutil.AddShards(ctx, t, ts, &vtctldatapb.Shard{
+			Keyspace: keyspace,
+			Name:     shard,
+			Shard: &topodatapb.Shard{
+				PrimaryAlias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  100,
+				},
+			},
+		})
+
+		testutil.AddTablets(ctx, t, ts, nil,
+			&topodatapb.Tablet{
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  100,
+				},
+				Keyspace: keyspace,
+				Shard:    shard,
+			},
+			&topodatapb.Tablet{
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  101,
+				},
+				Keyspace: keyspace,
+				Shard:    shard,
+			},
+			&topodatapb.Tablet{
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  102,
+				},
+				Keyspace: keyspace,
+				Shard:    shard,
+			},
+		)
+
+		reparenttestutil.SetKeyspaceDurability(ctx, t, ts, keyspace, policy.DurabilityNone)
+
+		erp := NewEmergencyReparenter(ts, tmc, logutil.NewMemoryLogger())
+
+		// Trigger ERS and verify that the relay log wait timeout causes cleanup to
+		// restart replication only on the replica whose IO thread ERS stopped.
+		_, err := erp.ReparentShard(ctx, keyspace, shard, EmergencyReparentOptions{
+			WaitReplicasTimeout: 50 * time.Millisecond,
+		})
+
+		require.ErrorContains(t, err, "could not apply all relay logs within the provided waitReplicasTimeout")
+	})
+}
+
+// tabletAliasMatcher matches tablets by alias string for gomock expectations.
+func tabletAliasMatcher(alias string) gomock.Matcher {
+	return gomock.Cond(func(tablet *topodatapb.Tablet) bool {
+		return tablet != nil && topoproto.TabletAliasString(tablet.Alias) == alias
+	})
 }
 
 func TestEmergencyReparenter_promotionOfNewPrimary(t *testing.T) {
@@ -2404,7 +2748,7 @@ func TestEmergencyReparenter_waitForAllRelayLogsToApply(t *testing.T) {
 	tests := []struct {
 		name       string
 		tmc        *testutil.TabletManagerClient
-		candidates map[string]replication.Position
+		candidates map[string]*RelayLogPositions
 		tabletMap  map[string]*topo.TabletInfo
 		statusMap  map[string]*replicationdatapb.StopReplicationStatus
 		shouldErr  bool
@@ -2421,7 +2765,7 @@ func TestEmergencyReparenter_waitForAllRelayLogsToApply(t *testing.T) {
 					},
 				},
 			},
-			candidates: map[string]replication.Position{
+			candidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": {},
 				"zone1-0000000101": {},
 			},
@@ -2469,7 +2813,7 @@ func TestEmergencyReparenter_waitForAllRelayLogsToApply(t *testing.T) {
 					},
 				},
 			},
-			candidates: map[string]replication.Position{
+			candidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": {},
 				"zone1-0000000101": {},
 			},
@@ -2520,7 +2864,7 @@ func TestEmergencyReparenter_waitForAllRelayLogsToApply(t *testing.T) {
 					},
 				},
 			},
-			candidates: map[string]replication.Position{
+			candidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": {},
 				"zone1-0000000101": {},
 				"zone1-0000000102": {},
@@ -2585,7 +2929,7 @@ func TestEmergencyReparenter_waitForAllRelayLogsToApply(t *testing.T) {
 					},
 				},
 			},
-			candidates: map[string]replication.Position{
+			candidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": {},
 				"zone1-0000000101": {},
 			},
@@ -2795,37 +3139,74 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 		Sequence: 11,
 	}
 
-	positionMostAdvanced := replication.Position{GTIDSet: replication.Mysql56GTIDSet{}}
-	positionMostAdvanced.GTIDSet = positionMostAdvanced.GTIDSet.AddGTID(mysqlGTID1)
-	positionMostAdvanced.GTIDSet = positionMostAdvanced.GTIDSet.AddGTID(mysqlGTID2)
-	positionMostAdvanced.GTIDSet = positionMostAdvanced.GTIDSet.AddGTID(mysqlGTID3)
+	// most advanced gtid set
+	positionMostAdvanced := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
+	positionMostAdvanced.Combined.GTIDSet = positionMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID1)
+	positionMostAdvanced.Combined.GTIDSet = positionMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID2)
+	positionMostAdvanced.Combined.GTIDSet = positionMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID3)
+	positionMostAdvanced.Executed.GTIDSet = positionMostAdvanced.Executed.GTIDSet.AddGTID(mysqlGTID1)
+	positionMostAdvanced.Executed.GTIDSet = positionMostAdvanced.Executed.GTIDSet.AddGTID(mysqlGTID2)
 
-	positionIntermediate1 := replication.Position{GTIDSet: replication.Mysql56GTIDSet{}}
-	positionIntermediate1.GTIDSet = positionIntermediate1.GTIDSet.AddGTID(mysqlGTID1)
+	// same combined gtid set as positionMostAdvanced, but 1 position behind in gtid executed
+	positionAlmostMostAdvanced := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
+	positionAlmostMostAdvanced.Combined.GTIDSet = positionAlmostMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID1)
+	positionAlmostMostAdvanced.Combined.GTIDSet = positionAlmostMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID2)
+	positionAlmostMostAdvanced.Combined.GTIDSet = positionAlmostMostAdvanced.Combined.GTIDSet.AddGTID(mysqlGTID3)
+	positionAlmostMostAdvanced.Executed.GTIDSet = positionAlmostMostAdvanced.Executed.GTIDSet.AddGTID(mysqlGTID1)
 
-	positionIntermediate2 := replication.Position{GTIDSet: replication.Mysql56GTIDSet{}}
-	positionIntermediate2.GTIDSet = positionIntermediate2.GTIDSet.AddGTID(mysqlGTID1)
-	positionIntermediate2.GTIDSet = positionIntermediate2.GTIDSet.AddGTID(mysqlGTID2)
+	positionIntermediate1 := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
+	positionIntermediate1.Combined.GTIDSet = positionIntermediate1.Combined.GTIDSet.AddGTID(mysqlGTID1)
+	positionIntermediate1.Executed.GTIDSet = positionIntermediate1.Executed.GTIDSet.AddGTID(mysqlGTID1)
 
-	positionOnly2 := replication.Position{GTIDSet: replication.Mysql56GTIDSet{}}
-	positionOnly2.GTIDSet = positionOnly2.GTIDSet.AddGTID(mysqlGTID2)
+	positionIntermediate2 := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
+	positionIntermediate2.Combined.GTIDSet = positionIntermediate2.Combined.GTIDSet.AddGTID(mysqlGTID1)
+	positionIntermediate2.Combined.GTIDSet = positionIntermediate2.Combined.GTIDSet.AddGTID(mysqlGTID2)
+	positionIntermediate2.Executed.GTIDSet = positionIntermediate2.Executed.GTIDSet.AddGTID(mysqlGTID1)
 
-	positionEmpty := replication.Position{GTIDSet: replication.Mysql56GTIDSet{}}
+	positionOnly2 := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
+	positionOnly2.Combined.GTIDSet = positionOnly2.Combined.GTIDSet.AddGTID(mysqlGTID2)
+	positionOnly2.Executed.GTIDSet = positionOnly2.Executed.GTIDSet.AddGTID(mysqlGTID2)
+
+	positionEmpty := &RelayLogPositions{
+		Combined: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+		Executed: replication.Position{GTIDSet: replication.Mysql56GTIDSet{}},
+	}
 
 	tests := []struct {
 		name                 string
-		validCandidates      map[string]replication.Position
+		validCandidates      map[string]*RelayLogPositions
 		tabletMap            map[string]*topo.TabletInfo
 		emergencyReparentOps EmergencyReparentOptions
 		result               *topodatapb.Tablet
 		err                  string
 	}{
 		{
+			name:            "no valid candidates",
+			validCandidates: map[string]*RelayLogPositions{},
+			tabletMap:       map[string]*topo.TabletInfo{},
+			err:             "no valid candidates for emergency reparent",
+		}, {
 			name: "choose most advanced",
-			validCandidates: map[string]replication.Position{
+			validCandidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": positionMostAdvanced,
 				"zone1-0000000101": positionIntermediate1,
 				"zone1-0000000102": positionIntermediate2,
+				"zone1-0000000103": positionAlmostMostAdvanced,
 			},
 			tabletMap: map[string]*topo.TabletInfo{
 				"zone1-0000000100": {
@@ -2852,6 +3233,14 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 						},
 					},
 				},
+				"zone1-0000000103": {
+					Tablet: &topodatapb.Tablet{
+						Alias: &topodatapb.TabletAlias{
+							Cell: "zone1",
+							Uid:  103,
+						},
+					},
+				},
 				"zone1-0000000404": {
 					Tablet: &topodatapb.Tablet{
 						Alias: &topodatapb.TabletAlias{
@@ -2870,10 +3259,11 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 			},
 		}, {
 			name: "choose most advanced with the best promotion rule",
-			validCandidates: map[string]replication.Position{
+			validCandidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": positionMostAdvanced,
 				"zone1-0000000101": positionIntermediate1,
 				"zone1-0000000102": positionMostAdvanced,
+				"zone1-0000000103": positionAlmostMostAdvanced,
 			},
 			tabletMap: map[string]*topo.TabletInfo{
 				"zone1-0000000100": {
@@ -2900,6 +3290,14 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 							Uid:  102,
 						},
 						Type: topodatapb.TabletType_RDONLY,
+					},
+				},
+				"zone1-0000000103": {
+					Tablet: &topodatapb.Tablet{
+						Alias: &topodatapb.TabletAlias{
+							Cell: "zone1",
+							Uid:  103,
+						},
 					},
 				},
 				"zone1-0000000404": {
@@ -2924,10 +3322,11 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 				Cell: "zone1",
 				Uid:  102,
 			}},
-			validCandidates: map[string]replication.Position{
+			validCandidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": positionMostAdvanced,
 				"zone1-0000000101": positionIntermediate1,
 				"zone1-0000000102": positionMostAdvanced,
+				"zone1-0000000103": positionAlmostMostAdvanced,
 			},
 			tabletMap: map[string]*topo.TabletInfo{
 				"zone1-0000000100": {
@@ -2956,6 +3355,14 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 						Type: topodatapb.TabletType_RDONLY,
 					},
 				},
+				"zone1-0000000103": {
+					Tablet: &topodatapb.Tablet{
+						Alias: &topodatapb.TabletAlias{
+							Cell: "zone1",
+							Uid:  103,
+						},
+					},
+				},
 				"zone1-0000000404": {
 					Tablet: &topodatapb.Tablet{
 						Alias: &topodatapb.TabletAlias{
@@ -2978,7 +3385,7 @@ func TestEmergencyReparenter_findMostAdvanced(t *testing.T) {
 				Cell: "zone1",
 				Uid:  102,
 			}},
-			validCandidates: map[string]replication.Position{
+			validCandidates: map[string]*RelayLogPositions{
 				"zone1-0000000100": positionOnly2,
 				"zone1-0000000101": positionIntermediate1,
 				"zone1-0000000102": positionEmpty,
@@ -3379,7 +3786,8 @@ func TestEmergencyReparenter_reparentReplicas(t *testing.T) {
 			keyspace:  "testkeyspace",
 			shard:     "-",
 			shouldErr: false,
-		}, {
+		},
+		{
 			name:                 "single replica failing to SetReplicationSource does not fail the promotion",
 			emergencyReparentOps: EmergencyReparentOptions{},
 			tmc: &testutil.TabletManagerClient{
@@ -3522,7 +3930,7 @@ func TestEmergencyReparenter_reparentReplicas(t *testing.T) {
 					Shard: &topodatapb.Shard{
 						PrimaryAlias: &topodatapb.TabletAlias{
 							Cell: "zone1",
-							Uid:  000,
+							Uid:  0o00,
 						},
 					},
 				},
@@ -3663,7 +4071,8 @@ func TestEmergencyReparenter_promoteIntermediateSource(t *testing.T) {
 						Uid:  100,
 					},
 					Hostname: "primary-elect",
-				}, {
+				},
+				{
 					Alias: &topodatapb.TabletAlias{
 						Cell: "zone1",
 						Uid:  101,
@@ -3684,7 +4093,8 @@ func TestEmergencyReparenter_promoteIntermediateSource(t *testing.T) {
 						Uid:  100,
 					},
 					Hostname: "primary-elect",
-				}, {
+				},
+				{
 					Alias: &topodatapb.TabletAlias{
 						Cell: "zone1",
 						Uid:  101,
@@ -3793,7 +4203,8 @@ func TestEmergencyReparenter_promoteIntermediateSource(t *testing.T) {
 					},
 				},
 			},
-		}, {
+		},
+		{
 			name:                 "success - only 2 tablets and they error",
 			emergencyReparentOps: EmergencyReparentOptions{},
 			tmc: &testutil.TabletManagerClient{
@@ -3908,7 +4319,8 @@ func TestEmergencyReparenter_promoteIntermediateSource(t *testing.T) {
 						Uid:  100,
 					},
 					Hostname: "primary-elect",
-				}, {
+				},
+				{
 					Alias: &topodatapb.TabletAlias{
 						Cell: "zone1",
 						Uid:  101,
@@ -3978,7 +4390,8 @@ func TestEmergencyReparenter_promoteIntermediateSource(t *testing.T) {
 						Uid:  100,
 					},
 					Hostname: "primary-elect",
-				}, {
+				},
+				{
 					Alias: &topodatapb.TabletAlias{
 						Cell: "zone1",
 						Uid:  101,
@@ -5536,4 +5949,91 @@ func TestEmergencyReparenterFindErrantGTIDs(t *testing.T) {
 			require.True(t, slices.Contains(tt.wantMostAdvancedPossible, winningPrimary.Hostname), winningPrimary.Hostname)
 		})
 	}
+}
+
+// TestEmergencyReparenterFindErrantGTIDs_NilPosition is a regression test
+// for a bug where a nil *RelayLogPositions entry in validCandidates would
+// cause a nil pointer panic. The test includes:
+//   - zone1-0000000102: valid candidate with max reparent journal length
+//   - zone1-0000000103: nil position with max reparent journal length (exercises the maxLenCandidates loop)
+//   - zone1-0000000104: nil position with a lower reparent journal length (exercises the lagged-candidate loop)
+func TestEmergencyReparenterFindErrantGTIDs_NilPosition(t *testing.T) {
+	u1 := "00000000-0000-0000-0000-000000000001"
+	erp := &EmergencyReparenter{
+		tmc: &testutil.TabletManagerClient{
+			ReadReparentJournalInfoResults: map[string]int32{
+				"zone1-0000000102": 2,
+				"zone1-0000000103": 2,
+				"zone1-0000000104": 1,
+			},
+		},
+	}
+	tabletMap := map[string]*topo.TabletInfo{
+		"zone1-0000000102": {
+			Tablet: &topodatapb.Tablet{
+				Hostname: "zone1-0000000102",
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  102,
+				},
+				Type: topodatapb.TabletType_REPLICA,
+			},
+		},
+		"zone1-0000000103": {
+			Tablet: &topodatapb.Tablet{
+				Hostname: "zone1-0000000103",
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  103,
+				},
+				Type: topodatapb.TabletType_REPLICA,
+			},
+		},
+		"zone1-0000000104": {
+			Tablet: &topodatapb.Tablet{
+				Hostname: "zone1-0000000104",
+				Alias: &topodatapb.TabletAlias{
+					Cell: "zone1",
+					Uid:  104,
+				},
+				Type: topodatapb.TabletType_REPLICA,
+			},
+		},
+	}
+	statusMap := map[string]*replicationdatapb.StopReplicationStatus{
+		"zone1-0000000102": {
+			After: &replicationdatapb.Status{
+				RelayLogPosition: getRelayLogPosition("1-100"),
+				SourceUuid:       u1,
+			},
+		},
+		"zone1-0000000103": {
+			After: &replicationdatapb.Status{
+				RelayLogPosition: getRelayLogPosition("1-99"),
+				SourceUuid:       u1,
+			},
+		},
+		"zone1-0000000104": {
+			After: &replicationdatapb.Status{
+				RelayLogPosition: getRelayLogPosition("1-90"),
+				SourceUuid:       u1,
+			},
+		},
+	}
+	// Construct validCandidates with nil entries for zone1-0000000103 and
+	// zone1-0000000104. zone1-0000000103 has the same reparent journal length
+	// as zone1-0000000102 (maxLen), so it exercises the nil guard in the
+	// maxLenCandidates loop. zone1-0000000104 has a lower reparent journal
+	// length, so it exercises the nil guard in the lagged-candidate loop.
+	validCandidates := map[string]*RelayLogPositions{
+		"zone1-0000000102": {
+			Combined: replication.MustParsePosition(replication.Mysql56FlavorID, u1+":1-100"),
+		},
+		"zone1-0000000103": nil,
+		"zone1-0000000104": nil,
+	}
+
+	candidates, err := erp.findErrantGTIDs(t.Context(), validCandidates, statusMap, tabletMap, 10*time.Second)
+	require.NoError(t, err)
+	require.Contains(t, candidates, "zone1-0000000102")
 }

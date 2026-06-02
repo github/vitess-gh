@@ -172,34 +172,42 @@ List of changes between bootstrap image versions.
 ### Changes
 - Update build to golang 1.24.1
 
-## [43.0] - 2025-04-02
+## [44] - 2025-04-02
 ### Changes
 - Update build to golang 1.24.2
 
-## [43.1] - 2025-05-07
+## [45] - 2025-05-07
 ### Changes
 - Update build to golang 1.24.3
 
-## [43.2] - 2025-06-06
+## [46] - 2025-06-06
 ### Changes
 - Update build to golang 1.24.4
 
-## [43.3] - 2025-09-04
+## [47] - 2025-08-25
 ### Changes
-- Update build to golang 1.24.7
+- Update build to golang 1.25.0
 
-## [43.4] - 2025-10-14
+## [48] - 2025-09-04
 ### Changes
-- Update build to golang 1.24.9
+- Update build to golang 1.25.1
 
-## [43.5] - 2025-11-12
+## [48.0] - 2026-01-27
 ### Changes
-- Update build to golang 1.24.10
+- Update build to golang 1.25.6
 
-## [43.6] - 2026-01-27
+## [48.1] - 2026-02-07
 ### Changes
-- Update build to golang 1.24.12
+- Update build to golang 1.25.7
 
-## [43.7] - 2026-02-08
+## [48.2] - 2026-03-07
 ### Changes
-- Update build to golang 1.24.13
+- Update build to golang 1.25.8
+
+## [48.3] - 2026-04-09
+### Changes
+- Update build to golang 1.25.9
+
+## [48.4] - 2026-05-08
+### Changes
+- Update build to golang 1.25.10

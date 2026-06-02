@@ -22,7 +22,7 @@ jobs:
   upgrade_downgrade_test:
     timeout-minutes: 60
     name: Run Upgrade Downgrade Test - Reparent New Vtctl
-    runs-on: ${{ github.repository == 'vitessio/vitess' && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-16cpu-64gb-x86-64' || 'ubuntu-24.04' }}
 
     steps:
     - name: Skip CI
@@ -79,13 +79,14 @@ jobs:
       if: steps.output-next-release-ref.outputs.next_release_ref != '' && steps.changes.outputs.end_to_end == 'true'
       uses: ./.github/actions/setup-mysql
       with:
-        flavor: mysql-8.0
+        flavor: mysql-8.4
 
     - name: Get base dependencies
       timeout-minutes: 10
       if: steps.output-next-release-ref.outputs.next_release_ref != '' && steps.changes.outputs.end_to_end == 'true'
       run: |
         sudo DEBIAN_FRONTEND="noninteractive" apt-get update
+
         # Install everything else we need, and configure
         sudo apt-get install -y make unzip g++ etcd-client etcd-server curl git wget
         

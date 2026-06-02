@@ -63,6 +63,7 @@ import (
 	vschemapb "vitess.io/vitess/go/vt/proto/vschema"
 	vtctldatapb "vitess.io/vitess/go/vt/proto/vtctldata"
 	vtctlservicepb "vitess.io/vitess/go/vt/proto/vtctlservice"
+	vtorcdatapb "vitess.io/vitess/go/vt/proto/vtorcdata"
 	vtrpcpb "vitess.io/vitess/go/vt/proto/vtrpc"
 	"vitess.io/vitess/go/vt/schema"
 	"vitess.io/vitess/go/vt/schemamanager"
@@ -235,7 +236,7 @@ func (s *VtctldServer) ApplySchema(ctx context.Context, req *vtctldatapb.ApplySc
 	defer panicHandler(&err)
 
 	span.Annotate("keyspace", req.Keyspace)
-	span.Annotate("ddl_strategy", req.DdlStrategy)
+	span.Annotate("ddl-strategy", req.DdlStrategy)
 
 	if len(req.Sql) == 0 {
 		err = vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION, "Sql must be a non-empty array")
@@ -3122,6 +3123,21 @@ func (s *VtctldServer) MaterializeCreate(ctx context.Context, req *vtctldatapb.M
 	return resp, err
 }
 
+// WorkflowAddTables is part of the vtctlservicepb.VtctldServer interface.
+func (s *VtctldServer) WorkflowAddTables(ctx context.Context, req *vtctldatapb.WorkflowAddTablesRequest) (resp *vtctldatapb.WorkflowAddTablesResponse, err error) {
+	span, ctx := trace.NewSpan(ctx, "VtctldServer.WorkflowAddTables")
+	defer span.Finish()
+
+	defer panicHandler(&err)
+
+	span.Annotate("workflow", req.Workflow)
+	span.Annotate("keyspace", req.Keyspace)
+	span.Annotate("table_settings", req.TableSettings)
+
+	err = s.ws.WorkflowAddTables(ctx, req)
+	return resp, err
+}
+
 // MigrateCreate is part of the vtctlservicepb.VtctldServer interface.
 func (s *VtctldServer) MigrateCreate(ctx context.Context, req *vtctldatapb.MigrateCreateRequest) (resp *vtctldatapb.WorkflowStatusResponse, err error) {
 	span, ctx := trace.NewSpan(ctx, "VtctldServer.MigrateCreate")
@@ -3968,6 +3984,64 @@ func (s *VtctldServer) SetShardTabletControl(ctx context.Context, req *vtctldata
 	return &vtctldatapb.SetShardTabletControlResponse{
 		Shard: si.Shard,
 	}, nil
+}
+
+// SetVtorcEmergencyReparent enable/disables the use of EmergencyReparentShard in VTOrc recoveries for a given keyspace or keyspace/shard.
+func (s *VtctldServer) SetVtorcEmergencyReparent(ctx context.Context, req *vtctldatapb.SetVtorcEmergencyReparentRequest) (resp *vtctldatapb.SetVtorcEmergencyReparentResponse, err error) {
+	span, ctx := trace.NewSpan(ctx, "VtctldServer.SetVtorcEmergencyReparent")
+	defer span.Finish()
+
+	defer panicHandler(&err)
+
+	span.Annotate("keyspace", req.Keyspace)
+	span.Annotate("shard", req.Shard)
+	span.Annotate("disable", req.Disable)
+
+	ctx, unlock, lockErr := s.ts.LockKeyspace(ctx, req.Keyspace, "SetVtorcEmergencyReparent")
+	if lockErr != nil {
+		err = lockErr
+		return nil, err
+	}
+
+	defer unlock(&err)
+
+	// set ERS-disabled on the shard record unless it is undef
+	// or "0"/- (unsharded/full-keyspace). otherwise set
+	// ERS-disabled on the keyspace record.
+	if req.Shard != "" && req.Shard != "0" && req.Shard != "-" {
+		_, err := s.ts.UpdateShardFields(ctx, req.Keyspace, req.Shard, func(si *topo.ShardInfo) error {
+			if si.VtorcState != nil {
+				si.VtorcState.DisableEmergencyReparent = req.Disable
+			} else if req.Disable {
+				si.VtorcState = &vtorcdatapb.Shard{
+					DisableEmergencyReparent: req.Disable,
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ki, err := s.ts.GetKeyspace(ctx, req.Keyspace)
+		if err != nil {
+			return nil, err
+		}
+
+		if ki.VtorcState != nil {
+			ki.VtorcState.DisableEmergencyReparent = req.Disable
+		} else if req.Disable {
+			ki.VtorcState = &vtorcdatapb.Keyspace{
+				DisableEmergencyReparent: req.Disable,
+			}
+		}
+
+		if err = s.ts.UpdateKeyspace(ctx, ki); err != nil {
+			return nil, err
+		}
+	}
+
+	return &vtctldatapb.SetVtorcEmergencyReparentResponse{}, nil
 }
 
 // SetWritable is part of the vtctldservicepb.VtctldServer interface.

@@ -39,6 +39,7 @@ import (
 	"vitess.io/vitess/go/vt/proto/vtrpc"
 	"vitess.io/vitess/go/vt/servenv"
 	"vitess.io/vitess/go/vt/topo"
+	"vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/vterrors"
 )
 
@@ -118,13 +119,13 @@ type RestoreParams struct {
 	Cnf    *Mycnf
 	Mysqld MysqlDaemon
 	Logger logutil.Logger
-	// Concurrency is the value of --restore_concurrency flag (init restore parameter)
+	// Concurrency is the value of --restore-concurrency flag (init restore parameter)
 	// It determines how many files are processed in parallel
 	Concurrency int
 	// Extra env variables for pre-restore and post-restore transform hooks
 	HookExtraEnv map[string]string
 	// DeleteBeforeRestore tells us whether existing data should be deleted before
-	// restoring. This is always set to false when starting a tablet with -restore_from_backup,
+	// restoring. This is always set to false when starting a tablet with -restore-from-backup,
 	// but is set to true when executing a RestoreFromBackup command on an already running vttablet
 	DeleteBeforeRestore bool
 	// DbName is the name of the managed database / schema
@@ -211,7 +212,7 @@ func isIncrementalBackup(params BackupParams) bool {
 }
 
 func registerBackupEngineFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&backupEngineImplementation, "backup_engine_implementation", backupEngineImplementation, "Specifies which implementation to use for creating new backups (builtin or xtrabackup). Restores will always be done with whichever engine created a given backup.")
+	utils.SetFlagStringVar(fs, &backupEngineImplementation, "backup-engine-implementation", backupEngineImplementation, "Specifies which implementation to use for creating new backups (builtin or xtrabackup). Restores will always be done with whichever engine created a given backup.")
 }
 
 // GetBackupEngine returns the BackupEngine implementation that should be used

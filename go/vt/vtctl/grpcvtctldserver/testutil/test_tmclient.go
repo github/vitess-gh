@@ -128,7 +128,7 @@ func NewVtctldServerWithTabletManagerClient(t testing.TB, ts *topo.Server, tmc t
 
 const (
 	fsName                   = "go.vt.vtctl.grpcvtctldserver.testutil"
-	tmclientProtocolFlagName = "tablet_manager_protocol"
+	tmclientProtocolFlagName = "tablet-manager-protocol"
 )
 
 var fs *pflag.FlagSet
@@ -167,7 +167,7 @@ func init() {
 
 		tmclient.RegisterFlags(fs)
 	})
-	servenv.ParseFlags(fsName)
+	servenv.ParseFlagsForTests(fsName)
 }
 
 // TabletManagerClient implements the tmclient.TabletManagerClient interface
@@ -354,6 +354,10 @@ type TabletManagerClient struct {
 	StartReplicationDelays map[string]time.Duration
 	// keyed by tablet alias
 	StartReplicationResults map[string]error
+	// keyed by tablet alias
+	RestartReplicationDelays map[string]time.Duration
+	// keyed by tablet alias
+	RestartReplicationResults map[string]error
 	// keyed by tablet alias
 	StopReplicationDelays map[string]time.Duration
 	// keyed by tablet alias
@@ -1390,6 +1394,36 @@ func (fake *TabletManagerClient) StartReplication(ctx context.Context, tablet *t
 	}
 
 	if err, ok := fake.StartReplicationResults[key]; ok {
+		return err
+	}
+
+	return fmt.Errorf("%w: no result for key %s", assert.AnError, key)
+}
+
+// RestartReplication is part of the tmclient.TabletManagerClient interface.
+func (fake *TabletManagerClient) RestartReplication(ctx context.Context, tablet *topodatapb.Tablet, semiSync bool) error {
+	if fake.RestartReplicationResults == nil {
+		return assert.AnError
+	}
+
+	if tablet.Alias == nil {
+		return assert.AnError
+	}
+
+	key := topoproto.TabletAliasString(tablet.Alias)
+
+	if fake.RestartReplicationDelays != nil {
+		if delay, ok := fake.RestartReplicationDelays[key]; ok {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+				// proceed to results
+			}
+		}
+	}
+
+	if err, ok := fake.RestartReplicationResults[key]; ok {
 		return err
 	}
 

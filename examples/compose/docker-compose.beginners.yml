@@ -58,19 +58,20 @@ services:
       - "3306"
 
   vtctld:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15000:$WEB_PORT"
       - "$GRPC_PORT"
     command: ["sh", "-c", " /vt/bin/vtctld \
+        # TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
         $TOPOLOGY_FLAGS \
         --cell $CELL \
-        --service_map 'grpc-vtctl,grpc-vtctld' \
-        --backup_storage_implementation file \
-        --file_backup_storage_root /vt/vtdataroot/backups \
+        --service-map 'grpc-vtctl,grpc-vtctld' \
+        --backup-storage-implementation file \
+        --file-backup-storage-root /vt/vtdataroot/backups \
         --logtostderr=true \
         --port $WEB_PORT \
-        --grpc_port $GRPC_PORT
+        --grpc-port $GRPC_PORT
         "]
     depends_on:
       consul1:
@@ -83,23 +84,24 @@ services:
         condition: service_healthy
 
   vtgate:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15099:$WEB_PORT"
       - "$GRPC_PORT"
       - "15306:$MYSQL_PORT"
     command: ["sh", "-c", "/vt/bin/vtgate \
+        # TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
         $TOPOLOGY_FLAGS \
         --logtostderr=true \
         --port $WEB_PORT \
-        --grpc_port $GRPC_PORT \
-        --mysql_server_port $MYSQL_PORT \
-        --mysql_auth_server_impl none \
+        --grpc-port $GRPC_PORT \
+        --mysql-server-port $MYSQL_PORT \
+        --mysql-auth-server-impl none \
         --cell $CELL \
-        --cells_to_watch $CELL \
-        --tablet_types_to_wait PRIMARY,REPLICA \
-        --service_map 'grpc-vtgateservice' \
-        --enable_system_settings=true \
+        --cells-to-watch $CELL \
+        --tablet-types-to-wait PRIMARY,REPLICA \
+        --service-map 'grpc-vtgateservice' \
+        --enable-system-settings=true \
         "]
     volumes:
       - ".:/script"
@@ -113,7 +115,7 @@ services:
         condition: service_healthy
 
   schemaload:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     command:
     - sh
     - -c
@@ -146,12 +148,12 @@ services:
     environment:
       - KEYSPACES=$KEYSPACE
       - GRPC_PORT=15999
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - .:/script
 
   vttablet100:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15100:$WEB_PORT"
       - "$GRPC_PORT"
@@ -183,7 +185,7 @@ services:
       retries: 15
 
   vttablet101:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15101:$WEB_PORT"
       - "$GRPC_PORT"
@@ -215,7 +217,7 @@ services:
       retries: 15
 
   vttablet102:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15102:$WEB_PORT"
       - "$GRPC_PORT"
@@ -247,7 +249,7 @@ services:
       retries: 15
 
   vttablet103:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15103:$WEB_PORT"
       - "$GRPC_PORT"
@@ -279,7 +281,7 @@ services:
       retries: 15
 
   vtorc:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     command: ["sh", "-c", "/script/vtorc-up.sh"]
     depends_on:
       - vtctld
@@ -309,7 +311,7 @@ services:
       retries: 15
 
   vreplication:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - ".:/script"
     environment:

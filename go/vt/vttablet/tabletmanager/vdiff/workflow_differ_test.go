@@ -35,6 +35,7 @@ import (
 
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
 	tabletmanagerdatapb "vitess.io/vitess/go/vt/proto/tabletmanagerdata"
+	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
 	vschemapb "vitess.io/vitess/go/vt/proto/vschema"
 )
 
@@ -1109,7 +1110,7 @@ func TestBuildPlanFailure(t *testing.T) {
 			Match:  "t1",
 			Filter: "select c3 from t1",
 		},
-		err: "column c3 not found in table t1 on tablet cell:\"cell1\" uid:100",
+		err: fmt.Sprintf("column c3 not found in table t1 on tablet %v", &topodatapb.TabletAlias{Cell: "cell1", Uid: 100}),
 	}}
 	for _, tcase := range testcases {
 		dbc := binlogplayer.NewMockDBClient(t)

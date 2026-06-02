@@ -21,12 +21,14 @@ package mysqlctlclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/pflag"
 
 	"vitess.io/vitess/go/vt/log"
 	mysqlctlpb "vitess.io/vitess/go/vt/proto/mysqlctl"
 	"vitess.io/vitess/go/vt/servenv"
+	"vitess.io/vitess/go/vt/utils"
 )
 
 var protocol = "grpc"
@@ -36,7 +38,7 @@ func init() {
 }
 
 func registerFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&protocol, "mysqlctl_client_protocol", protocol, "the protocol to use to talk to the mysqlctl server")
+	utils.SetFlagStringVar(fs, &protocol, "mysqlctl-client-protocol", protocol, "the protocol to use to talk to the mysqlctl server")
 }
 
 // MysqlctlClient defines the interface used to send remote mysqlctl commands
@@ -45,7 +47,7 @@ type MysqlctlClient interface {
 	Start(ctx context.Context, mysqldArgs ...string) error
 
 	// Shutdown calls Mysqld.Shutdown remotely.
-	Shutdown(ctx context.Context, waitForMysqld bool) error
+	Shutdown(ctx context.Context, waitForMysqld bool, shutdownTimeout time.Duration) error
 
 	// RunMysqlUpgrade calls Mysqld.RunMysqlUpgrade remotely.
 	RunMysqlUpgrade(ctx context.Context) error

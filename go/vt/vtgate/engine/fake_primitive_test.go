@@ -19,7 +19,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -59,18 +58,6 @@ var _ Primitive = (*fakePrimitive)(nil)
 func (f *fakePrimitive) rewind() {
 	f.curResult = 0
 	f.log = nil
-}
-
-func (f *fakePrimitive) RouteType() string {
-	return "Fake"
-}
-
-func (f *fakePrimitive) GetKeyspaceName() string {
-	return "fakeKs"
-}
-
-func (f *fakePrimitive) GetTableName() string {
-	return "fakeTable"
 }
 
 func (f *fakePrimitive) TryExecute(ctx context.Context, vcursor VCursor, bindVars map[string]*querypb.BindVariable, wantfields bool) (*sqltypes.Result, error) {
@@ -184,7 +171,7 @@ func (f *fakePrimitive) GetFields(ctx context.Context, vcursor VCursor, bindVars
 
 func (f *fakePrimitive) ExpectLog(t *testing.T, want []string) {
 	t.Helper()
-	if !reflect.DeepEqual(f.log, want) {
+	if strings.Join(f.log, "\n") != strings.Join(want, "\n") {
 		t.Errorf("vc.log got:\n%v\nwant:\n%v", strings.Join(f.log, "\n"), strings.Join(want, "\n"))
 	}
 }

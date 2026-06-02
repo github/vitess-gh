@@ -594,8 +594,6 @@ func TestMoveTablesDDLFlag(t *testing.T) {
 			require.NoError(t, err)
 			sourceShard, err := env.topoServ.GetShardNames(ctx, ms.SourceKeyspace)
 			require.NoError(t, err)
-			want := fmt.Sprintf("shard_streams:{key:\"%s/%s\" value:{streams:{id:1 tablet:{cell:\"%s\" uid:200} source_shard:\"%s/%s\" position:\"%s\" status:\"Running\" info:\"VStream Lag: 0s\"}}} traffic_state:\"Reads Not Switched. Writes Not Switched\"",
-				ms.TargetKeyspace, targetShard[0], env.cell, ms.SourceKeyspace, sourceShard[0], gtid(position))
 
 			res, err := env.ws.MoveTablesCreate(ctx, &vtctldatapb.MoveTablesCreateRequest{
 				Workflow:       ms.Workflow,
@@ -604,8 +602,29 @@ func TestMoveTablesDDLFlag(t *testing.T) {
 				IncludeTables:  []string{"t1"},
 				OnDdl:          onDDLAction,
 			})
+			key := fmt.Sprintf("%s/%s", ms.TargetKeyspace, targetShard[0])
+			want := &vtctldatapb.WorkflowStatusResponse{
+				ShardStreams: map[string]*vtctldatapb.WorkflowStatusResponse_ShardStreams{
+					key: {
+						Streams: []*vtctldatapb.WorkflowStatusResponse_ShardStreamState{
+							{
+								Id: 1,
+								Tablet: &topodatapb.TabletAlias{
+									Cell: env.cell,
+									Uid:  200,
+								},
+								SourceShard: fmt.Sprintf("%s/%s", ms.SourceKeyspace, sourceShard[0]),
+								Position:    gtid(position),
+								Status:      "Running",
+								Info:        "VStream Lag: 0s",
+							},
+						},
+					},
+				},
+				TrafficState: "Reads Not Switched. Writes Not Switched",
+			}
 			require.NoError(t, err)
-			require.Equal(t, want, fmt.Sprintf("%+v", res))
+			require.Equal(t, want, res)
 		})
 	}
 }
@@ -1344,6 +1363,203 @@ func TestCreateLookupVindexFull(t *testing.T) {
 				}, {
 					Name:   "v",
 					Column: "col2",
+				}},
+			},
+		},
+	}
+	vschema, err := env.topoServ.GetVSchema(ctx, ms.SourceKeyspace)
+	require.NoError(t, err)
+	utils.MustMatch(t, wantvschema, vschema.Keyspace)
+
+	wantvschema = &vschemapb.Keyspace{
+		Tables: map[string]*vschemapb.Table{
+			"lookup": {},
+		},
+	}
+	vschema, err = env.topoServ.GetVSchema(ctx, ms.TargetKeyspace)
+	require.NoError(t, err)
+	utils.MustMatch(t, wantvschema, vschema.Keyspace)
+}
+
+func TestCreateLookupVindexMultipleCreate(t *testing.T) {
+	ms := &vtctldatapb.MaterializeSettings{
+		Workflow:       "lookup",
+		SourceKeyspace: "sourceks",
+		TargetKeyspace: "targetks",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	env := newTestMaterializerEnv(t, ctx, ms, []string{"0"}, []string{"0"})
+	defer env.close()
+
+	specs := &vschemapb.Keyspace{
+		Vindexes: map[string]*vschemapb.Vindex{
+			"v1": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table": "targetks.lookup",
+					"from":  "col2",
+					"to":    "keyspace_id",
+				},
+				Owner: "t1",
+			},
+			"v2": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table": "targetks.lookup",
+					"from":  "col4",
+					"to":    "keyspace_id",
+				},
+				Owner: "t2",
+			},
+		},
+		Tables: map[string]*vschemapb.Table{
+			"t1": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "v1",
+					Column: "col2",
+				}},
+			},
+			"t2": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "v2",
+					Column: "col4",
+				}},
+			},
+		},
+	}
+	// Dummy sourceSchema
+	sourceSchema1 := "CREATE TABLE `t1` (\n" +
+		"  `col1` int(11) NOT NULL AUTO_INCREMENT,\n" +
+		"  `col2` int(11) DEFAULT NULL,\n" +
+		"  PRIMARY KEY (`id`)\n" +
+		") ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1"
+
+	sourceSchema2 := "CREATE TABLE `t2` (\n" +
+		"  `col3` int(11) NOT NULL AUTO_INCREMENT,\n" +
+		"  `col4` int(11) DEFAULT NULL,\n" +
+		"  PRIMARY KEY (`id`)\n" +
+		") ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=latin1"
+
+	sourceVSchema := &vschemapb.Keyspace{
+		Sharded: true,
+		Vindexes: map[string]*vschemapb.Vindex{
+			"xxhash": {
+				Type: "xxhash",
+			},
+		},
+		Tables: map[string]*vschemapb.Table{
+			"t1": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "xxhash",
+					Column: "col1",
+				}},
+			},
+			"t2": {},
+		},
+	}
+	env.tmc.schema[ms.SourceKeyspace+".t1"] = &tabletmanagerdatapb.SchemaDefinition{
+		TableDefinitions: []*tabletmanagerdatapb.TableDefinition{{
+			Fields: []*querypb.Field{{
+				Name: "col1",
+				Type: querypb.Type_INT64,
+			}, {
+				Name: "col2",
+				Type: querypb.Type_INT64,
+			}},
+			Schema: sourceSchema1,
+		}},
+	}
+	env.tmc.schema[ms.SourceKeyspace+".t2"] = &tabletmanagerdatapb.SchemaDefinition{
+		TableDefinitions: []*tabletmanagerdatapb.TableDefinition{{
+			Fields: []*querypb.Field{{
+				Name: "col3",
+				Type: querypb.Type_INT64,
+			}, {
+				Name: "col4",
+				Type: querypb.Type_INT64,
+			}},
+			Schema: sourceSchema2,
+		}},
+	}
+	if err := env.topoServ.SaveVSchema(ctx, &topo.KeyspaceVSchemaInfo{
+		Name:     ms.TargetKeyspace,
+		Keyspace: &vschemapb.Keyspace{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.topoServ.SaveVSchema(ctx, &topo.KeyspaceVSchemaInfo{
+		Name:     ms.SourceKeyspace,
+		Keyspace: sourceVSchema,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env.tmc.expectVRQuery(100, mzCheckJournal, &sqltypes.Result{})
+	env.tmc.expectFetchAsAllPrivsQuery(200, "select 1 from `lookup` limit 1", &sqltypes.Result{})
+
+	// Expect this query twice for 2 vindexes.
+	env.tmc.expectVRQuery(200, "/CREATE TABLE `lookup`", &sqltypes.Result{})
+	env.tmc.expectVRQuery(200, "/CREATE TABLE `lookup`", &sqltypes.Result{})
+
+	env.tmc.expectVRQuery(200, mzGetCopyState, &sqltypes.Result{})
+	env.tmc.expectVRQuery(200, mzGetLatestCopyState, &sqltypes.Result{})
+	env.tmc.expectVRQuery(200, insertPrefix, &sqltypes.Result{})
+	env.tmc.expectVRQuery(200, "update _vt.vreplication set state='Running' where db_name='vt_targetks' and workflow='lookup'", &sqltypes.Result{})
+
+	req := &vtctldatapb.LookupVindexCreateRequest{
+		Workflow:    ms.Workflow,
+		Keyspace:    ms.SourceKeyspace,
+		Cells:       []string{"cell"},
+		TabletTypes: []topodatapb.TabletType{topodatapb.TabletType_PRIMARY},
+		Vindex:      specs,
+	}
+
+	_, err := env.ws.LookupVindexCreate(ctx, req)
+	require.NoError(t, err)
+
+	wantvschema := &vschemapb.Keyspace{
+		Sharded: true,
+		Vindexes: map[string]*vschemapb.Vindex{
+			"xxhash": {
+				Type: "xxhash",
+			},
+			"v1": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table":      "targetks.lookup",
+					"from":       "col2",
+					"to":         "keyspace_id",
+					"write_only": "true",
+				},
+				Owner: "t1",
+			},
+			"v2": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table":      "targetks.lookup",
+					"from":       "col4",
+					"to":         "keyspace_id",
+					"write_only": "true",
+				},
+				Owner: "t2",
+			},
+		},
+		Tables: map[string]*vschemapb.Table{
+			"t1": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "xxhash",
+					Column: "col1",
+				}, {
+					Name:   "v1",
+					Column: "col2",
+				}},
+			},
+			"t2": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "v2",
+					Column: "col4",
 				}},
 			},
 		},
@@ -2798,20 +3014,6 @@ func TestCreateLookupVindexFailures(t *testing.T) {
 		err                    string
 	}{
 		{
-			description: "dup vindex",
-			input: &vschemapb.Keyspace{
-				Vindexes: map[string]*vschemapb.Vindex{
-					"v1": {
-						Type: "xxhash",
-					},
-					"v2": {
-						Type: "xxhash",
-					},
-				},
-			},
-			err: "only one vindex must be specified",
-		},
-		{
 			description: "not a lookup",
 			input: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
@@ -2889,7 +3091,7 @@ func TestCreateLookupVindexFailures(t *testing.T) {
 			input: &vschemapb.Keyspace{
 				Vindexes: unique,
 			},
-			err: "one or two tables must be specified",
+			err: "at least one table must be specified",
 		},
 		{
 			description: "too many tables",
@@ -2974,7 +3176,7 @@ func TestCreateLookupVindexFailures(t *testing.T) {
 					},
 				},
 			},
-			err: "vindex owner (otherTable) must match table name (t1)",
+			err: "table owner not found for vindex v",
 		},
 		{
 			description: "owner must match",

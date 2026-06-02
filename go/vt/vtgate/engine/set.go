@@ -99,21 +99,6 @@ var unsupportedSQLModes = []string{"ANSI_QUOTES", "NO_BACKSLASH_ESCAPES", "PIPES
 
 var _ Primitive = (*Set)(nil)
 
-// RouteType implements the Primitive interface method.
-func (s *Set) RouteType() string {
-	return "Set"
-}
-
-// GetKeyspaceName implements the Primitive interface method.
-func (s *Set) GetKeyspaceName() string {
-	return ""
-}
-
-// GetTableName implements the Primitive interface method.
-func (s *Set) GetTableName() string {
-	return ""
-}
-
 // TryExecute implements the Primitive interface method.
 func (s *Set) TryExecute(ctx context.Context, vcursor VCursor, bindVars map[string]*querypb.BindVariable, wantfields bool) (*sqltypes.Result, error) {
 	input, err := vcursor.ExecutePrimitive(ctx, s.Input, bindVars, false)
@@ -484,6 +469,12 @@ func (svss *SysVarSetAware) Execute(ctx context.Context, vcursor VCursor, env *e
 			return err
 		}
 		vcursor.Session().SetQueryTimeout(queryTimeout)
+	case sysvars.TransactionTimeout.Name:
+		transactionTimeout, err := svss.evalAsInt64(env, vcursor)
+		if err != nil {
+			return err
+		}
+		vcursor.Session().SetTransactionTimeout(transactionTimeout)
 	case sysvars.SessionEnableSystemSettings.Name:
 		err = svss.setBoolSysVar(ctx, env, vcursor.Session().SetSessionEnableSystemSettings)
 	case sysvars.Charset.Name, sysvars.Names.Name:

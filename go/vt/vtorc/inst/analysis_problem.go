@@ -128,7 +128,12 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 		},
 	},
 
-	// PrimaryDiskStalled
+	// PrimaryDiskStalled — no action other than ERS can resolve a stalled
+	// disk; tablet-level fixes can't recover a stalled-disk primary. Other
+	// analyses must NOT declare `BeforeAnalyses: PrimaryDiskStalled` —
+	// doing so would mask this shard-wide action via same-tablet selection.
+	// E.g. a primary that is both read-only and disk-stalled should always
+	// ERS away, demoting this tablet — not run `fixPrimary` first.
 	{
 		Meta: &DetectionAnalysisProblemMeta{
 			Analysis:    PrimaryDiskStalled,
@@ -202,6 +207,7 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 			Description: "Primary is read-only",
 			Priority:    detectionAnalysisPriorityHigh,
 		},
+		BeforeAnalyses: []AnalysisCode{PrimarySemiSyncBlocked},
 		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
 			return a.IsClusterPrimary && a.IsReadOnly
 		},
@@ -318,7 +324,7 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 			Priority:    detectionAnalysisPriorityShardWideAction,
 		},
 		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
-			return topo.IsReplicaType(a.TabletType) && ca.primaryAlias == "" && a.ShardPrimaryTermTimestamp == ""
+			return topo.IsReplicaType(a.TabletType) && ca.primaryAlias == "" && a.ShardPrimaryTermTimestamp.IsZero()
 		},
 	},
 	{
@@ -328,11 +334,22 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 			Priority:    detectionAnalysisPriorityShardWideAction,
 		},
 		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
-			return topo.IsReplicaType(a.TabletType) && ca.primaryAlias == "" && a.ShardPrimaryTermTimestamp != ""
+			return topo.IsReplicaType(a.TabletType) && ca.primaryAlias == "" && !a.ShardPrimaryTermTimestamp.IsZero()
 		},
 	},
 
 	// Replica connectivity checks
+	{
+		Meta: &DetectionAnalysisProblemMeta{
+			Analysis:    ReplicationStopped,
+			Description: "Replication is stopped",
+			Priority:    detectionAnalysisPriorityMedium,
+		},
+		BeforeAnalyses: []AnalysisCode{PrimarySemiSyncBlocked},
+		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
+			return topo.IsReplicaType(a.TabletType) && !a.IsPrimary && a.ReplicationStopped
+		},
+	},
 	{
 		Meta: &DetectionAnalysisProblemMeta{
 			Analysis:    NotConnectedToPrimary,
@@ -363,17 +380,6 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 			return topo.IsReplicaType(a.TabletType) && !a.IsPrimary && ca.primaryAlias != "" && a.AnalyzedInstancePrimaryAlias != ca.primaryAlias
 		},
 	},
-	{
-		Meta: &DetectionAnalysisProblemMeta{
-			Analysis:    ReplicationStopped,
-			Description: "Replication is stopped",
-			Priority:    detectionAnalysisPriorityMedium,
-		},
-		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
-			return topo.IsReplicaType(a.TabletType) && !a.IsPrimary && a.ReplicationStopped
-		},
-	},
-
 	// Unreachable primary checks
 	{
 		Meta: &DetectionAnalysisProblemMeta{
@@ -395,6 +401,17 @@ var detectionAnalysisProblems = []*DetectionAnalysisProblem{
 			return a.IsPrimary && !a.LastCheckValid && !a.LastCheckPartialSuccess && a.CountValidReplicas > 0 && a.CountValidReplicatingReplicas == a.CountValidReplicas
 		},
 	},
+	{
+		Meta: &DetectionAnalysisProblemMeta{
+			Analysis:    UnreachablePrimaryWithBrokenReplicas,
+			Description: "Primary cannot be reached by vtorc but it has (some, but not all) replicating replicas; possibly a network/host issue",
+			Priority:    detectionAnalysisPriorityMedium,
+		},
+		MatchFunc: func(a *DetectionAnalysis, ca *clusterAnalysis, primary, tablet *topodatapb.Tablet, isInvalid, isStaleBinlogCoordinates bool) bool {
+			return a.IsPrimary && !a.LastCheckValid && !a.LastCheckPartialSuccess && a.CountValidReplicas > 0 && a.CountValidReplicatingReplicas > 0 && a.CountValidReplicatingReplicas < a.CountValidReplicas
+		},
+	},
+
 	// Locked semi-sync primary
 	{
 		Meta: &DetectionAnalysisProblemMeta{

@@ -962,6 +962,8 @@ const (
 	LaunchAllMigrationType
 	CompleteMigrationType
 	CompleteAllMigrationType
+	PostponeCompleteMigrationType
+	PostponeCompleteAllMigrationType
 	CancelMigrationType
 	CancelAllMigrationType
 	CleanupMigrationType
@@ -1133,4 +1135,11 @@ const (
 	IndexTypeUnique
 	IndexTypeSpatial
 	IndexTypeFullText
+)
+
+// Constant for Enum Type - IgnoreOrReplaceType
+const (
+	NoIgnoreOrReplace IgnoreOrReplaceType = iota
+	IgnoreType
+	ReplaceType
 )

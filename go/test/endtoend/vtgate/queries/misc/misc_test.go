@@ -19,13 +19,13 @@ package misc
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"vitess.io/vitess/go/mysql"
-	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/vt/sqlparser"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -691,13 +691,16 @@ func TestAlterTableWithView(t *testing.T) {
 	mcmp.AssertMatches("select * from v1", `[[INT64(1) INT64(1)]]`)
 }
 
+//go:embed join_output1.json
+var expJoinOutput1 string
+
+//go:embed join_output2.json
+var expJoinOutput2 string
+
 // TestStraightJoin tests that Vitess respects the ordering of join in a STRAIGHT JOIN query.
 func TestStraightJoin(t *testing.T) {
 	mcmp, closer := start(t)
 	defer closer()
-
-	vtgateVer, err := cluster.GetMajorVersion("vtgate")
-	require.NoError(t, err)
 
 	mcmp.Exec("insert into tbl(id, unq_col, nonunq_col) values (1,0,10), (2,10,10), (3,4,20), (4,30,20), (5,40,10)")
 	mcmp.Exec(`insert into t1(id1, id2) values (10, 11), (20, 13)`)
@@ -708,10 +711,8 @@ func TestStraightJoin(t *testing.T) {
 	// Verify that in a normal join query, vitess joins tbl with t1.
 	res, err := mcmp.VtConn.ExecuteFetch("vexplain plan select tbl.unq_col, tbl.nonunq_col, t1.id2 from t1 join tbl where t1.id1 = tbl.nonunq_col", 100, false)
 	require.NoError(t, err)
-	if vtgateVer < 23 {
-		// v23 onwards we test differently. Part of PR https://github.com/vitessio/vitess/pull/18149
-		require.Contains(t, fmt.Sprintf("%v", res.Rows), "tbl_t1")
-	}
+	require.Len(t, res.Rows, 1)
+	require.JSONEq(t, expJoinOutput1, res.Rows[0][0].ToString())
 
 	// Test the same query with a straight join
 	mcmp.AssertMatchesNoOrder("select tbl.unq_col, tbl.nonunq_col, t1.id2 from t1 straight_join tbl where t1.id1 = tbl.nonunq_col",
@@ -720,10 +721,8 @@ func TestStraightJoin(t *testing.T) {
 	// Verify that in a straight join query, vitess joins t1 with tbl.
 	res, err = mcmp.VtConn.ExecuteFetch("vexplain plan select tbl.unq_col, tbl.nonunq_col, t1.id2 from t1 straight_join tbl where t1.id1 = tbl.nonunq_col", 100, false)
 	require.NoError(t, err)
-	if vtgateVer < 23 {
-		// v23 onwards we test differently. Part of PR https://github.com/vitessio/vitess/pull/18149
-		require.Contains(t, fmt.Sprintf("%v", res.Rows), "t1_tbl")
-	}
+	require.Len(t, res.Rows, 1)
+	require.JSONEq(t, expJoinOutput2, res.Rows[0][0].ToString())
 }
 
 func TestFailingOuterJoinInOLAP(t *testing.T) {
@@ -841,9 +840,12 @@ func TestSemiJoin(t *testing.T) {
 
 // TestTabletTypeRouting tests that the tablet type routing works as intended.
 func TestTabletTypeRouting(t *testing.T) {
-	// We are gonna configure the routing rules to send the
-	// query for a replica tablet in ks_misc.t1 to go to a table that doesn't exist.
-	// I know this doesn't make much practical sense, but makes testing really easy.
+	// We are gonna configure the routing rules to send the query for a replica
+	// tablet in ks_misc.t1 to a table in a different keyspace (uks). Since uks
+	// is started with 0 replica tablets (see TestMain), the replica-side query
+	// will fail with "no healthy tablet available" for the uks keyspace —
+	// which is the signal that the @replica routing rule fired and rewrote the
+	// target keyspace correctly. The primary-side query still reaches ks_misc.t1.
 	routingRules := `{"rules": [
 	{
 	"from_table": "ks_misc.t1@replica",
@@ -869,9 +871,11 @@ func TestTabletTypeRouting(t *testing.T) {
 	utils.AssertMatches(t, vtConn, "select * from ks_misc.t1", `[[INT64(0) INT64(0)]]`)
 	// Now we change the connection's target
 	utils.Exec(t, vtConn, "use ks_misc@replica")
-	// We verify that querying the replica tablet creates an unknown table error.
+	// We verify that the replica-side query is redirected to uks by the routing rule.
 	_, err = utils.ExecAllowError(t, vtConn, "select * from ks_misc.t1")
-	require.ErrorContains(t, err, "table unknown not found")
+	require.Error(t, err)
+	require.ErrorContains(t, err, "uks")
+	require.ErrorContains(t, err, "replica")
 }
 
 // TestJoinMixedCaseExpr tests that join condition with expression from both table having in clause is handled correctly.

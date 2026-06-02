@@ -17,7 +17,9 @@ limitations under the License.
 package tabletmanager
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1933,6 +1935,16 @@ func TestExternalizeLookupVindex(t *testing.T) {
 				},
 				Owner: "t1",
 			},
+			"owned_lookup2": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table":      "targetks.owned_lookup2",
+					"from":       "c1",
+					"to":         "c2",
+					"write_only": "true",
+				},
+				Owner: "t2",
+			},
 			"unowned_lookup": {
 				Type: "lookup_unique",
 				Params: map[string]string{
@@ -1961,6 +1973,15 @@ func TestExternalizeLookupVindex(t *testing.T) {
 					Column: "col2",
 				}},
 			},
+			"t2": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "xxhash",
+					Column: "col1",
+				}, {
+					Name:   "owned_lookup2",
+					Column: "col2",
+				}},
+			},
 		},
 	}
 
@@ -1983,6 +2004,17 @@ func TestExternalizeLookupVindex(t *testing.T) {
 	unownedRunning := sqltypes.MakeTestResult(fields, "2|Running|msg|"+unownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
 	unownedStopped := sqltypes.MakeTestResult(fields, "2|Stopped|Stopped after copy|"+unownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
 
+	raw := `{
+		"lookup_vindexes": [
+		  "owned_lookup",
+		  "owned_lookup2"
+		]
+	  }`
+	var buf bytes.Buffer
+	json.Compact(&buf, []byte(raw))
+	options := buf.String()
+
+	ownedMultipleRunning := sqltypes.MakeTestResult(fields, "1|Running|msg|"+ownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|"+options)
 	testcases := []struct {
 		request         *vtctldatapb.LookupVindexExternalizeRequest
 		vrResponse      *sqltypes.Result
@@ -2101,23 +2133,43 @@ func TestExternalizeLookupVindex(t *testing.T) {
 		},
 		{
 			request: &vtctldatapb.LookupVindexExternalizeRequest{
-				Name:          "absent_lookup",
+				Name:          "multiple_lv_workflow",
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: ownedMultipleRunning,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
-					"absent_lookup": {
+					"owned_lookup": {
 						Type: "lookup_unique",
 						Params: map[string]string{
-							"table": "targetks.absent_lookup",
+							"table": "targetks.owned_lookup",
 							"from":  "c1",
 							"to":    "c2",
 						},
+						Owner: "t1",
+					},
+					"owned_lookup2": {
+						Type: "lookup_unique",
+						Params: map[string]string{
+							"table": "targetks.owned_lookup2",
+							"from":  "c1",
+							"to":    "c2",
+						},
+						Owner: "t2",
 					},
 				},
 			},
-			err: "vindex absent_lookup not found in the sourceks keyspace",
+			expectStopped: true,
+		},
+		{
+			request: &vtctldatapb.LookupVindexExternalizeRequest{
+				Name:          "absent_workflow",
+				Keyspace:      ms.SourceKeyspace,
+				TableKeyspace: ms.TargetKeyspace,
+			},
+			expectedVschema: &vschemapb.Keyspace{},
+			err:             "failed to parse workflow options",
 		},
 	}
 	for _, tcase := range testcases {
@@ -2154,8 +2206,13 @@ func TestExternalizeLookupVindex(t *testing.T) {
 			)
 			for _, targetTablet := range targetShards {
 				targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+				if tcase.vrResponse != nil {
+					targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+				}
 				// Update queries are required only if the Vindex is owned.
-				if tcase.expectStopped && len(tcase.expectedVschema.Vindexes) > 0 && tcase.expectedVschema.Vindexes[tcase.request.Name].Owner != "" {
+				isBackfillingOwned, err := workflow.IsBackfillingOwnedVindexes(tcase.expectedVschema.Vindexes)
+				require.NoError(t, err)
+				if tcase.expectStopped && len(tcase.expectedVschema.Vindexes) > 0 && isBackfillingOwned {
 					targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflowConfig, tcase.request.Name, tenv.dbName), sqltypes.MakeTestResult(
 						sqltypes.MakeTestFields(
 							"id|source|cell|tablet_types|state|message",
@@ -2199,11 +2256,12 @@ func TestExternalizeLookupVindex(t *testing.T) {
 
 			aftervschema, err := tenv.ts.GetVSchema(ctx, ms.SourceKeyspace)
 			require.NoError(t, err)
-			vindex := aftervschema.Vindexes[tcase.request.Name]
-			expectedVindex := tcase.expectedVschema.Vindexes[tcase.request.Name]
-			require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
-			require.NotContains(t, vindex.Params, "write_only", tcase.request)
-			require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			for expectedVindexName, expectedVindex := range tcase.expectedVschema.Vindexes {
+				vindex := aftervschema.Vindexes[expectedVindexName]
+				require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
+				require.NotContains(t, vindex.Params, "write_only", tcase.request)
+				require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			}
 		})
 	}
 }
@@ -2261,6 +2319,15 @@ func TestInternalizeLookupVindex(t *testing.T) {
 				},
 				Owner: "t1",
 			},
+			"owned_lookup2": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table": "targetks.owned_lookup2",
+					"from":  "c1",
+					"to":    "c2",
+				},
+				Owner: "t2",
+			},
 			"unowned_lookup": {
 				Type: "lookup_unique",
 				Params: map[string]string{
@@ -2288,6 +2355,15 @@ func TestInternalizeLookupVindex(t *testing.T) {
 					Column: "col2",
 				}},
 			},
+			"t2": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "xxhash",
+					Column: "col1",
+				}, {
+					Name:   "owned_lookup2",
+					Column: "col2",
+				}},
+			},
 		},
 	}
 
@@ -2303,6 +2379,24 @@ func TestInternalizeLookupVindex(t *testing.T) {
 		ms.SourceKeyspace, ms.SourceKeyspace)
 	ownedRunning := sqltypes.MakeTestResult(fields, "1|Running|msg|"+ownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
 	ownedStopped := sqltypes.MakeTestResult(fields, "1|Stopped|"+workflow.Frozen+"|"+ownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+
+	unownedSourceStopAfterCopy := fmt.Sprintf(`keyspace:"%s",shard:"0",filter:{rules:{match:"unowned_lookup" filter:"select * from t1 where in_keyrange(col1, '%s.xxhash', '-80')"}} stop_after_copy:true`,
+		ms.SourceKeyspace, ms.SourceKeyspace)
+	unownedSourceKeepRunningAfterCopy := fmt.Sprintf(`keyspace:"%s",shard:"0",filter:{rules:{match:"unowned_lookup" filter:"select * from t1 where in_keyrange(col1, '%s.xxhash', '-80')"}}`,
+		ms.SourceKeyspace, ms.SourceKeyspace)
+	unownedRunning := sqltypes.MakeTestResult(fields, "2|Running|msg|"+unownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+	unownedStopped := sqltypes.MakeTestResult(fields, "2|Stopped|Stopped after copy|"+unownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+
+	raw := `{
+		"lookup_vindexes": [
+		  "owned_lookup",
+		  "owned_lookup2"
+		]
+	  }`
+	buf := bytes.Buffer{}
+	json.Compact(&buf, []byte(raw))
+	options := buf.String()
+	ownedMultipleStopped := sqltypes.MakeTestResult(fields, "1|Stopped|"+workflow.Frozen+"|"+ownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|"+options)
 
 	testcases := []struct {
 		request         *vtctldatapb.LookupVindexInternalizeRequest
@@ -2338,6 +2432,7 @@ func TestInternalizeLookupVindex(t *testing.T) {
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: unownedStopped,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
 					"unowned_lookup": {
@@ -2381,6 +2476,7 @@ func TestInternalizeLookupVindex(t *testing.T) {
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: unownedRunning,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
 					"unowned_lookup": {
@@ -2398,23 +2494,44 @@ func TestInternalizeLookupVindex(t *testing.T) {
 		},
 		{
 			request: &vtctldatapb.LookupVindexInternalizeRequest{
-				Name:          "absent_lookup",
+				Name:          "multiple_lv_workflow",
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: ownedMultipleStopped,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
-					"absent_lookup": {
+					"owned_lookup": {
 						Type: "lookup_unique",
 						Params: map[string]string{
-							"table": "targetks.absent_lookup",
-							"from":  "c1",
-							"to":    "c2",
+							"table":      "targetks.owned_lookup",
+							"from":       "c1",
+							"to":         "c2",
+							"write_only": "true",
 						},
+						Owner: "t1",
+					},
+					"owned_lookup2": {
+						Type: "lookup_unique",
+						Params: map[string]string{
+							"table":      "targetks.owned_lookup2",
+							"from":       "c1",
+							"to":         "c2",
+							"write_only": "true",
+						},
+						Owner: "t2",
 					},
 				},
 			},
-			err: "vindex absent_lookup not found in the sourceks keyspace",
+		},
+		{
+			request: &vtctldatapb.LookupVindexInternalizeRequest{
+				Name:          "absent_workflow",
+				Keyspace:      ms.SourceKeyspace,
+				TableKeyspace: ms.TargetKeyspace,
+			},
+			expectedVschema: &vschemapb.Keyspace{},
+			err:             "failed to parse workflow options",
 		},
 	}
 	for _, tcase := range testcases {
@@ -2431,12 +2548,19 @@ func TestInternalizeLookupVindex(t *testing.T) {
 
 			require.NotNil(t, tcase.request, "No request provided")
 
+			isBackfillingOwned, err := workflow.IsBackfillingOwnedVindexes(tcase.expectedVschema.Vindexes)
+			require.NoError(t, err)
 			for _, targetTablet := range targetShards {
+				// Tests with unowned vindexes will need only one
+				// query as they will error out before.
+				targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
 				if tcase.vrResponse != nil {
-					targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+					if len(tcase.expectedVschema.Vindexes) > 0 && isBackfillingOwned {
+						targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+					}
 				}
 				// Update queries are required only if the Vindex is owned.
-				if len(tcase.expectedVschema.Vindexes) > 0 && tcase.expectedVschema.Vindexes[tcase.request.Name].Owner != "" {
+				if len(tcase.expectedVschema.Vindexes) > 0 && isBackfillingOwned {
 					unfreezeQuery, err := sqlparser.ParseAndBind(workflow.SqlUnfreezeWorkflow,
 						sqltypes.StringBindVariable("vt_targetks"),
 						sqltypes.StringBindVariable(tcase.request.Name),
@@ -2456,10 +2580,11 @@ func TestInternalizeLookupVindex(t *testing.T) {
 			require.NoError(t, err)
 			aftervschema, err := tenv.ts.GetVSchema(ctx, ms.SourceKeyspace)
 			require.NoError(t, err)
-			vindex := aftervschema.Vindexes[tcase.request.Name]
-			expectedVindex := tcase.expectedVschema.Vindexes[tcase.request.Name]
-			require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
-			require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			for expectedVindexName, expectedVindex := range tcase.expectedVschema.Vindexes {
+				vindex := aftervschema.Vindexes[expectedVindexName]
+				require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
+				require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			}
 		})
 	}
 }
@@ -2517,6 +2642,15 @@ func TestCompleteLookupVindex(t *testing.T) {
 				},
 				Owner: "t1",
 			},
+			"owned_lookup2": {
+				Type: "lookup_unique",
+				Params: map[string]string{
+					"table": "targetks.owned_lookup2",
+					"from":  "c1",
+					"to":    "c2",
+				},
+				Owner: "t2",
+			},
 			"unowned_lookup": {
 				Type: "lookup_unique",
 				Params: map[string]string{
@@ -2544,6 +2678,15 @@ func TestCompleteLookupVindex(t *testing.T) {
 					Column: "col2",
 				}},
 			},
+			"t2": {
+				ColumnVindexes: []*vschemapb.ColumnVindex{{
+					Name:   "xxhash",
+					Column: "col1",
+				}, {
+					Name:   "owned_lookup2",
+					Column: "col2",
+				}},
+			},
 		},
 	}
 
@@ -2559,6 +2702,24 @@ func TestCompleteLookupVindex(t *testing.T) {
 		ms.SourceKeyspace, ms.SourceKeyspace)
 	ownedRunning := sqltypes.MakeTestResult(fields, "1|Running|msg|"+ownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
 	ownedStopped := sqltypes.MakeTestResult(fields, "1|Stopped|"+workflow.Frozen+"|"+ownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+
+	unownedSourceStopAfterCopy := fmt.Sprintf(`keyspace:"%s",shard:"0",filter:{rules:{match:"unowned_lookup" filter:"select * from t1 where in_keyrange(col1, '%s.xxhash', '-80')"}} stop_after_copy:true`,
+		ms.SourceKeyspace, ms.SourceKeyspace)
+	unownedSourceKeepRunningAfterCopy := fmt.Sprintf(`keyspace:"%s",shard:"0",filter:{rules:{match:"unowned_lookup" filter:"select * from t1 where in_keyrange(col1, '%s.xxhash', '-80')"}}`,
+		ms.SourceKeyspace, ms.SourceKeyspace)
+	unownedRunning := sqltypes.MakeTestResult(fields, "2|Running|msg|"+unownedSourceKeepRunningAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+	unownedStopped := sqltypes.MakeTestResult(fields, "2|Stopped|Stopped after copy|"+unownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|{}")
+
+	raw := `{
+		"lookup_vindexes": [
+		  "owned_lookup",
+		  "owned_lookup2"
+		]
+	  }`
+	buf := bytes.Buffer{}
+	json.Compact(&buf, []byte(raw))
+	options := buf.String()
+	ownedMultipleStopped := sqltypes.MakeTestResult(fields, "1|Stopped|"+workflow.Frozen+"|"+ownedSourceStopAfterCopy+"|"+wftype+"|0|0|0|0|0|0|"+trxTS+"|5|"+options)
 
 	testcases := []struct {
 		request         *vtctldatapb.LookupVindexCompleteRequest
@@ -2595,6 +2756,7 @@ func TestCompleteLookupVindex(t *testing.T) {
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: unownedStopped,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
 					"unowned_lookup": {
@@ -2637,6 +2799,7 @@ func TestCompleteLookupVindex(t *testing.T) {
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: unownedRunning,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
 					"unowned_lookup": {
@@ -2653,23 +2816,43 @@ func TestCompleteLookupVindex(t *testing.T) {
 		},
 		{
 			request: &vtctldatapb.LookupVindexCompleteRequest{
-				Name:          "absent_lookup",
+				Name:          "multiple_lv_workflow",
 				Keyspace:      ms.SourceKeyspace,
 				TableKeyspace: ms.TargetKeyspace,
 			},
+			vrResponse: ownedMultipleStopped,
 			expectedVschema: &vschemapb.Keyspace{
 				Vindexes: map[string]*vschemapb.Vindex{
-					"absent_lookup": {
+					"owned_lookup": {
 						Type: "lookup_unique",
 						Params: map[string]string{
-							"table": "targetks.absent_lookup",
+							"table": "targetks.owned_lookup",
 							"from":  "c1",
 							"to":    "c2",
 						},
+						Owner: "t1",
+					},
+					"owned_lookup2": {
+						Type: "lookup_unique",
+						Params: map[string]string{
+							"table": "targetks.owned_lookup2",
+							"from":  "c1",
+							"to":    "c2",
+						},
+						Owner: "t2",
 					},
 				},
 			},
-			err: "vindex absent_lookup not found in the sourceks keyspace",
+			expectDelete: true,
+		},
+		{
+			request: &vtctldatapb.LookupVindexCompleteRequest{
+				Name:          "absent_workflow",
+				Keyspace:      ms.SourceKeyspace,
+				TableKeyspace: ms.TargetKeyspace,
+			},
+			expectedVschema: &vschemapb.Keyspace{},
+			err:             "failed to parse workflow options",
 		},
 	}
 	for _, tcase := range testcases {
@@ -2686,9 +2869,16 @@ func TestCompleteLookupVindex(t *testing.T) {
 
 			require.NotNil(t, tcase.request, "No request provided")
 
+			isBackfillingOwned, err := workflow.IsBackfillingOwnedVindexes(tcase.expectedVschema.Vindexes)
+			require.NoError(t, err)
 			for _, targetTablet := range targetShards {
+				// Tests with unowned vindexes will need only one
+				// query as they will error out before.
+				targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
 				if tcase.vrResponse != nil {
-					targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+					if len(tcase.expectedVschema.Vindexes) > 0 && isBackfillingOwned {
+						targetTablet.vrdbClient.ExpectRequest(fmt.Sprintf(readWorkflow, tcase.request.Name, tenv.dbName), tcase.vrResponse, nil)
+					}
 				}
 				if tcase.err == "" {
 					// We query the workflow again to build the status output when
@@ -2715,11 +2905,12 @@ func TestCompleteLookupVindex(t *testing.T) {
 
 			aftervschema, err := tenv.ts.GetVSchema(ctx, ms.SourceKeyspace)
 			require.NoError(t, err)
-			vindex := aftervschema.Vindexes[tcase.request.Name]
-			expectedVindex := tcase.expectedVschema.Vindexes[tcase.request.Name]
-			require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
-			require.NotContains(t, vindex.Params, "write_only", tcase.request)
-			require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			for expectedVindexName, expectedVindex := range tcase.expectedVschema.Vindexes {
+				vindex := aftervschema.Vindexes[expectedVindexName]
+				require.NotNil(t, vindex, "vindex %s not found in vschema", tcase.request.Name)
+				require.NotContains(t, vindex.Params, "write_only", tcase.request)
+				require.Equal(t, expectedVindex, vindex, "vindex mismatch. expected: %+v, got: %+v", expectedVindex, vindex)
+			}
 		})
 	}
 }

@@ -204,6 +204,9 @@ service Vtctld {
   // from a source keyspace to a target keyspace using a provided expressions.
   rpc MaterializeCreate(vtctldata.MaterializeCreateRequest) returns (vtctldata.MaterializeCreateResponse) {};
 
+  // WorkflowAddTables adds tables to the existing materialize/movetables workflow.
+  rpc WorkflowAddTables(vtctldata.WorkflowAddTablesRequest) returns (vtctldata.WorkflowAddTablesResponse) {};
+
   // MigrateCreate creates a workflow which migrates one or more tables from an
   // external cluster into Vitess.
   rpc MigrateCreate(vtctldata.MigrateCreateRequest) returns (vtctldata.WorkflowStatusResponse) {};
@@ -292,6 +295,8 @@ service Vtctld {
   // Reshard. See the documentation on SetShardTabletControlRequest for more
   // information about the different update modes.
   rpc SetShardTabletControl(vtctldata.SetShardTabletControlRequest) returns (vtctldata.SetShardTabletControlResponse) {};
+  // SetVtorcEmergencyReparent enables or disables the use of EmergencyReparentShard in VTOrc recoveries for a given keyspace or keyspace/shard.
+  rpc SetVtorcEmergencyReparent(vtctldata.SetVtorcEmergencyReparentRequest) returns (vtctldata.SetVtorcEmergencyReparentResponse) {};
   // SetWritable sets a tablet as read-write (writable=true) or read-only (writable=false).
   rpc SetWritable(vtctldata.SetWritableRequest) returns (vtctldata.SetWritableResponse) {};
   // ShardReplicationAdd adds an entry to a topodata.ShardReplication object.

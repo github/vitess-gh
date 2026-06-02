@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -28,8 +29,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"encoding/json"
 
 	"github.com/google/go-containerregistry/pkg/crane"
 	gocr "github.com/google/go-containerregistry/pkg/v1"
@@ -365,6 +364,7 @@ func replaceGoVersionInCodebase(old, new *version.Version) error {
 		"./build.env",
 		"./docker/bootstrap/Dockerfile.common",
 		"./docker/lite/Dockerfile",
+		"./docker/lite/Dockerfile.mysql80",
 		"./docker/lite/Dockerfile.mysql84",
 		"./docker/lite/Dockerfile.percona80",
 		"./docker/vttestserver/Dockerfile.mysql80",

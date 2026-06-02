@@ -31,6 +31,7 @@ import (
 
 	"vitess.io/vitess/go/mysql"
 	"vitess.io/vitess/go/test/endtoend/cluster"
+	"vitess.io/vitess/go/vt/utils"
 )
 
 var (
@@ -95,8 +96,8 @@ func createCluster(extraVTGateArgs []string) (*cluster.LocalProcessCluster, int)
 	}
 
 	vtGateArgs := []string{
-		"--mysql_auth_server_static_file", clusterInstance.TmpDirectory + "/" + mysqlAuthServerStatic,
-		"--keyspaces_to_watch", keyspaceUnshardedName,
+		"--mysql-auth-server-static-file", clusterInstance.TmpDirectory + "/" + mysqlAuthServerStatic,
+		utils.GetFlagVariantForTests("--keyspaces-to-watch"), keyspaceUnshardedName,
 	}
 
 	if extraVTGateArgs != nil {
@@ -141,7 +142,7 @@ func TestRoutingWithKeyspacesToWatch(t *testing.T) {
 func TestVSchemaDDLWithKeyspacesToWatch(t *testing.T) {
 
 	extraVTGateArgs := []string{
-		"--vschema_ddl_authorized_users", "%",
+		"--vschema-ddl-authorized-users", "%",
 	}
 	clusterInstance, exitCode := createCluster(extraVTGateArgs)
 	defer clusterInstance.Teardown()
@@ -159,7 +160,7 @@ func TestVSchemaDDLWithKeyspacesToWatch(t *testing.T) {
 	require.Nil(t, err)
 	defer db.Close()
 
-	// The topo server must be read-only when using keyspaces_to_watch in order to prevent
+	// The topo server must be read-only when using keyspaces-to-watch in order to prevent
 	// potentially corrupting the VSchema based on this vtgates limited view of the world
 	_, err = db.Exec(vschemaDDL)
 	require.EqualError(t, err, vschemaDDLError)

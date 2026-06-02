@@ -58,9 +58,6 @@ type Route struct {
 	// Query specifies the query to be executed.
 	Query string
 
-	// TableName specifies the tables to send the query to.
-	TableName string
-
 	// FieldQuery specifies the query to be executed for a GetFieldInfo request.
 	FieldQuery string
 
@@ -105,21 +102,6 @@ func NewRoute(opcode Opcode, keyspace *vindexes.Keyspace, query, fieldQuery stri
 }
 
 var partialSuccessScatterQueries = stats.NewCounter("PartialSuccessScatterQueries", "Count of partially successful scatter queries")
-
-// RouteType returns a description of the query routing type used by the primitive
-func (route *Route) RouteType() string {
-	return route.Opcode.String()
-}
-
-// GetKeyspaceName specifies the Keyspace that this primitive routes to.
-func (route *Route) GetKeyspaceName() string {
-	return route.Keyspace.Name
-}
-
-// GetTableName specifies the table that this primitive routes to.
-func (route *Route) GetTableName() string {
-	return route.TableName
-}
 
 // TryExecute performs a non-streaming exec.
 func (route *Route) TryExecute(ctx context.Context, vcursor VCursor, bindVars map[string]*querypb.BindVariable, wantfields bool) (*sqltypes.Result, error) {
@@ -376,7 +358,6 @@ func (route *Route) sort(in *sqltypes.Result) (*sqltypes.Result, error) {
 func (route *Route) description() PrimitiveDescription {
 	other := map[string]any{
 		"Query":      route.Query,
-		"Table":      route.GetTableName(),
 		"FieldQuery": route.FieldQuery,
 	}
 	if route.FetchLastInsertID {

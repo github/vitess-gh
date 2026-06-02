@@ -55,12 +55,13 @@ jobs:
       - name: Setup MySQL
         uses: ./.github/actions/setup-mysql
         with:
-          flavor: mysql-8.0
+          flavor: mysql-8.4
 
       - name: Get base dependencies
         timeout-minutes: 10
         run: |
           sudo DEBIAN_FRONTEND="noninteractive" apt-get update
+
           # Install everything else we need, and configure
           sudo apt-get install -y make unzip g++ etcd-client etcd-server curl git wget
 

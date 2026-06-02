@@ -20,7 +20,7 @@ jobs:
   upgrade_downgrade_test_manual:
     timeout-minutes: 40
     name: Run Upgrade Downgrade Test - Backups - Manual
-    runs-on: ${{ github.repository == 'vitessio/vitess' && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-16cpu-64gb-x86-64' || 'ubuntu-24.04' }}
 
     steps:
     - name: Skip CI
@@ -59,6 +59,7 @@ jobs:
             - '.github/workflows/upgrade_downgrade_test_backups_manual.yml'
             - 'examples/**'
 
+
     - name: Set output with latest release branch
       if: steps.changes.outputs.end_to_end == 'true'
       id: output-previous-release-ref
@@ -79,7 +80,7 @@ jobs:
       if: steps.changes.outputs.end_to_end == 'true'
       uses: ./.github/actions/setup-mysql
       with:
-        flavor: mysql-8.0
+        flavor: mysql-8.4
 
     - name: Get base dependencies
       timeout-minutes: 10

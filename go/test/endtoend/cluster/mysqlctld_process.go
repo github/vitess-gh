@@ -51,6 +51,7 @@ type MysqlctldProcess struct {
 // InitDb executes mysqlctld command to add cell info
 func (mysqlctld *MysqlctldProcess) InitDb() (err error) {
 	args := []string{
+		//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 		"--log_dir", mysqlctld.LogDirectory,
 		"--tablet_uid", fmt.Sprintf("%d", mysqlctld.TabletUID),
 		"--mysql_port", fmt.Sprintf("%d", mysqlctld.MySQLPort),
@@ -73,11 +74,13 @@ func (mysqlctld *MysqlctldProcess) Start() error {
 	}
 	_ = createDirectory(mysqlctld.LogDirectory, 0700)
 	args := []string{
+		//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 		"--log_dir", mysqlctld.LogDirectory,
 		"--tablet_uid", fmt.Sprintf("%d", mysqlctld.TabletUID),
 		"--mysql_port", fmt.Sprintf("%d", mysqlctld.MySQLPort),
 	}
 	if mysqlctld.SocketFile != "" {
+		//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 		args = append(args, "--socket_file", mysqlctld.SocketFile)
 	}
 	tempProcess := exec.Command(
@@ -89,6 +92,7 @@ func (mysqlctld *MysqlctldProcess) Start() error {
 
 	if mysqlctld.InitMysql {
 		tempProcess.Args = append(tempProcess.Args,
+			//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 			"--init_db_sql_file", mysqlctld.InitDBFile)
 	}
 
@@ -160,6 +164,7 @@ func (mysqlctld *MysqlctldProcess) Stop() error {
 	mysqlctld.exitSignalReceived = true
 	tmpProcess := exec.Command(
 		"mysqlctl",
+		//TODO: Remove underscore(_) flags in v25, replace them with dashed(-) notation
 		"--tablet_uid", fmt.Sprintf("%d", mysqlctld.TabletUID),
 	)
 	tmpProcess.Args = append(tmpProcess.Args, mysqlctld.ExtraArgs...)

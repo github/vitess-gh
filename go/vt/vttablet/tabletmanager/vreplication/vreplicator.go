@@ -57,6 +57,13 @@ var (
 	// vreplicationMinimumHeartbeatUpdateInterval overrides vreplicationHeartbeatUpdateInterval if the latter is higher than this
 	// to ensure that it satisfies liveness criteria implicitly expected by internal processes like Online DDL
 	vreplicationMinimumHeartbeatUpdateInterval = 60
+
+	// buildColInfoMapMaxAttempts and buildColInfoMapInitialDelay bound the
+	// retry of the information_schema.columns query when MySQL has just
+	// created a table but has not yet populated its column metadata
+	// (issue #19989).
+	buildColInfoMapMaxAttempts  = 5
+	buildColInfoMapInitialDelay = 100 * time.Millisecond
 )
 
 const (
@@ -146,7 +153,7 @@ func newVReplicator(id int32, source *binlogdatapb.BinlogSource, sourceVStreamer
 		workflowConfig = vttablet.DefaultVReplicationConfig
 	}
 	if workflowConfig.HeartbeatUpdateInterval > vreplicationMinimumHeartbeatUpdateInterval {
-		log.Warningf("The supplied value for vreplication_heartbeat_update_interval:%d seconds is larger than the maximum allowed:%d seconds, vreplication will fallback to %d",
+		log.Warningf("The supplied value for vreplication-heartbeat-update-interval:%d seconds is larger than the maximum allowed:%d seconds, vreplication will fallback to %d",
 			workflowConfig.HeartbeatUpdateInterval, vreplicationMinimumHeartbeatUpdateInterval, vreplicationMinimumHeartbeatUpdateInterval)
 	}
 	vttablet.InitVReplicationConfigDefaults()
@@ -305,6 +312,13 @@ func (vr *vreplicator) replicate(ctx context.Context) error {
 					return err
 				}
 			} else {
+				if vr.state != binlogdatapb.VReplicationWorkflowState_Copying {
+					if err := vr.setState(binlogdatapb.VReplicationWorkflowState_Copying, ""); err != nil {
+						vr.stats.ErrorCounts.Add([]string{"Copy"}, 1)
+						return err
+					}
+					vr.insertLog(LogCopyRestart, fmt.Sprintf("Copy phase restarted for %d table(s)", numTablesToCopy))
+				}
 				if err := newVCopier(vr).copyNext(ctx, settings); err != nil {
 					vr.stats.ErrorCounts.Add([]string{"Copy"}, 1)
 					return err
@@ -370,12 +384,9 @@ func (vr *vreplicator) buildColInfoMap(ctx context.Context) (map[string][]*Colum
 	colInfoMap := make(map[string][]*ColumnInfo)
 	for _, td := range schema.TableDefinitions {
 		query := fmt.Sprintf(queryTemplate, encodeString(vr.dbClient.DBName()), encodeString(td.Name))
-		qr, err := vr.mysqld.FetchSuperQuery(ctx, query)
+		qr, err := vr.fetchInfoSchemaColumns(ctx, query, td.Name)
 		if err != nil {
 			return nil, err
-		}
-		if len(qr.Rows) == 0 {
-			return nil, fmt.Errorf("no data returned from information_schema.columns")
 		}
 
 		var pks []string
@@ -446,6 +457,35 @@ func (vr *vreplicator) buildColInfoMap(ctx context.Context) (map[string][]*Colum
 		colInfoMap[td.Name] = colInfo
 	}
 	return colInfoMap, nil
+}
+
+// fetchInfoSchemaColumns runs the information_schema.columns query with
+// bounded exponential backoff for the documented MySQL race where a newly
+// created table appears in information_schema.tables before its column
+// metadata is queryable (issue #19989). A real query error short-circuits
+// the retry; only an empty result triggers a backoff.
+func (vr *vreplicator) fetchInfoSchemaColumns(ctx context.Context, query, tableName string) (*sqltypes.Result, error) {
+	delay := buildColInfoMapInitialDelay
+	for attempt := 1; ; attempt++ {
+		qr, err := vr.mysqld.FetchSuperQuery(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if len(qr.Rows) > 0 {
+			return qr, nil
+		}
+		if attempt >= buildColInfoMapMaxAttempts {
+			return nil, vterrors.Errorf(vtrpcpb.Code_INTERNAL,
+				"no data returned from information_schema.columns for table %s after %d attempts",
+				tableName, buildColInfoMapMaxAttempts)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
 }
 
 // Same as readSettings, but stores some of the results on this vr.
@@ -965,7 +1005,7 @@ func (vr *vreplicator) execPostCopyActions(ctx context.Context, tableName string
 		select {
 		// Stop any further actions if the vreplicator's context is
 		// cancelled -- most likely due to hitting the
-		// vreplication_copy_phase_duration
+		// vreplication-copy-phase-duration
 		case <-ctx.Done():
 			return vterrors.Errorf(vtrpcpb.Code_CANCELED, "context has expired")
 		default:

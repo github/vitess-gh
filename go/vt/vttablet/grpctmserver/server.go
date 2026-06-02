@@ -432,6 +432,13 @@ func (s *server) StartReplication(ctx context.Context, request *tabletmanagerdat
 	return response, s.tm.StartReplication(ctx, request.GetSemiSync())
 }
 
+func (s *server) RestartReplication(ctx context.Context, request *tabletmanagerdatapb.RestartReplicationRequest) (response *tabletmanagerdatapb.RestartReplicationResponse, err error) {
+	defer s.tm.HandleRPCPanic(ctx, "RestartReplication", request, response, true /*verbose*/, &err)
+	ctx = callinfo.GRPCCallInfo(ctx)
+	response = &tabletmanagerdatapb.RestartReplicationResponse{}
+	return response, s.tm.RestartReplication(ctx, request.GetSemiSync())
+}
+
 func (s *server) StartReplicationUntilAfter(ctx context.Context, request *tabletmanagerdatapb.StartReplicationUntilAfterRequest) (response *tabletmanagerdatapb.StartReplicationUntilAfterResponse, err error) {
 	defer s.tm.HandleRPCPanic(ctx, "StartReplication", request, response, true /*verbose*/, &err)
 	ctx = callinfo.GRPCCallInfo(ctx)
@@ -537,6 +544,20 @@ func (s *server) VDiff(ctx context.Context, request *tabletmanagerdatapb.VDiffRe
 	defer s.tm.HandleRPCPanic(ctx, "VDiff", request, response, true /*verbose*/, &err)
 	ctx = callinfo.GRPCCallInfo(ctx)
 	response, err = s.tm.VDiff(ctx, request)
+	return response, err
+}
+
+func (s *server) UpdateSequenceTables(ctx context.Context, request *tabletmanagerdatapb.UpdateSequenceTablesRequest) (response *tabletmanagerdatapb.UpdateSequenceTablesResponse, err error) {
+	defer s.tm.HandleRPCPanic(ctx, "UpdateSequenceTables", request, response, true /*verbose*/, &err)
+	ctx = callinfo.GRPCCallInfo(ctx)
+	response, err = s.tm.UpdateSequenceTables(ctx, request)
+	return response, err
+}
+
+func (s *server) GetMaxValueForSequences(ctx context.Context, request *tabletmanagerdatapb.GetMaxValueForSequencesRequest) (response *tabletmanagerdatapb.GetMaxValueForSequencesResponse, err error) {
+	defer s.tm.HandleRPCPanic(ctx, "GetMaxValueForSequences", request, response, true /*verbose*/, &err)
+	ctx = callinfo.GRPCCallInfo(ctx)
+	response, err = s.tm.GetMaxValueForSequences(ctx, request)
 	return response, err
 }
 

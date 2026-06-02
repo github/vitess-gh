@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"vitess.io/vitess/go/vt/topo/topoproto"
 	"vitess.io/vitess/go/vt/vterrors"
@@ -195,7 +196,7 @@ func testBuffering1WithOptions(t *testing.T, fail failover, concurrency int) {
 
 	// Second failover: Buffering is skipped because last failover is too recent.
 	if retryDone, err := b.WaitForFailoverEnd(context.Background(), keyspace, shard, nil, failoverErr); err != nil || retryDone != nil {
-		t.Fatalf("subsequent failovers must be skipped due to -buffer_min_time_between_failovers setting. err: %v retryDone: %v", err, retryDone)
+		t.Fatalf("subsequent failovers must be skipped due to -buffer-min-time-between-failovers setting. err: %v retryDone: %v", err, retryDone)
 	}
 	if got, want := requestsSkipped.Counts()[statsKeyJoinedLastFailoverTooRecent], int64(1); got != want {
 		t.Fatalf("skipped request was not tracked: got = %v, want = %v", got, want)
@@ -377,7 +378,7 @@ func testLastReparentTooRecentBuffering1(t *testing.T, fail failover) {
 	now = now.Add(1 * time.Second)
 	fail(b, newPrimary, keyspace, shard, now)
 
-	// After we're past the --buffer_min_time_between_failovers threshold, go
+	// After we're past the --buffer-min-time-between-failovers threshold, go
 	// through a failover with non-zero QPS.
 	now = now.Add(cfg.MinTimeBetweenFailovers)
 	// We're seeing errors first.
@@ -820,6 +821,50 @@ func testShutdown1(t *testing.T, fail failover) {
 	if err := waitForPoolSlots(b, cfg.Size); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestShutdown_WaitForFailoverEndAfterShutdownIsNoop(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.Enabled = true
+	cfg.MaxFailoverDuration = 500 * time.Millisecond
+	b := New(cfg)
+
+	sb := b.getOrCreateBuffer(keyspace, shard)
+	require.NotNil(t, sb)
+	require.Equal(t, stateIdle, sb.testGetState())
+
+	b.Shutdown()
+
+	type result struct {
+		retryDone RetryDoneFunc
+		err       error
+	}
+	resCh := make(chan result, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	go func() {
+		rd, err := sb.waitForFailoverEnd(ctx, keyspace, shard, nil, failoverErr)
+		resCh <- result{rd, err}
+	}()
+
+	var r result
+	require.Eventually(t, func() bool {
+		select {
+		case r = <-resCh:
+			if r.retryDone != nil {
+				r.retryDone()
+			}
+			return true
+		default:
+			return false
+		}
+	}, 30*time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, stateIdle, sb.testGetState(),
+		"sb transitioned out of stateIdle after Buffer.Shutdown returned")
+	assert.Nil(t, r.retryDone, "waitForFailoverEnd should return nil RetryDoneFunc after Buffer.Shutdown")
+	assert.NoError(t, r.err, "waitForFailoverEnd should return nil error after Buffer.Shutdown")
 }
 
 func TestParallelRangeIndex(t *testing.T) {

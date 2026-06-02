@@ -72,7 +72,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
 
     name: Run endtoend tests on Cluster (${{ matrix.shard }})
-    runs-on: ${{ github.repository == 'vitessio/vitess' && contains(matrix.needs, 'larger-runner') && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
+    runs-on: ${{ contains(matrix.needs, 'larger-runner') && github.repository == 'vitessio/vitess' && 'oracle-vm-16cpu-64gb-x86-64' || 'ubuntu-24.04' }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -144,7 +144,7 @@ jobs:
         if: steps.changes.outputs.end_to_end == 'true' && !contains(matrix.needs, 'xtrabackup')
         uses: ./.github/actions/setup-mysql
         with:
-          flavor: mysql-8.0
+          flavor: mysql-8.4
 
       - name: Setup Percona Server and XtraBackup
         if: steps.changes.outputs.end_to_end == 'true' && contains(matrix.needs, 'xtrabackup')

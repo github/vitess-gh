@@ -75,6 +75,8 @@ type TabletManagerClient interface {
 	StopReplicationMinimum(ctx context.Context, in *tabletmanagerdata.StopReplicationMinimumRequest, opts ...grpc.CallOption) (*tabletmanagerdata.StopReplicationMinimumResponse, error)
 	// StartReplication starts the mysql replication
 	StartReplication(ctx context.Context, in *tabletmanagerdata.StartReplicationRequest, opts ...grpc.CallOption) (*tabletmanagerdata.StartReplicationResponse, error)
+	// RestartReplication stops and then starts the mysql replication
+	RestartReplication(ctx context.Context, in *tabletmanagerdata.RestartReplicationRequest, opts ...grpc.CallOption) (*tabletmanagerdata.RestartReplicationResponse, error)
 	// StartReplicationUnitAfter starts the mysql replication until and including
 	// the provided position
 	StartReplicationUntilAfter(ctx context.Context, in *tabletmanagerdata.StartReplicationUntilAfterRequest, opts ...grpc.CallOption) (*tabletmanagerdata.StartReplicationUntilAfterResponse, error)
@@ -92,6 +94,8 @@ type TabletManagerClient interface {
 	ValidateVReplicationPermissions(ctx context.Context, in *tabletmanagerdata.ValidateVReplicationPermissionsRequest, opts ...grpc.CallOption) (*tabletmanagerdata.ValidateVReplicationPermissionsResponse, error)
 	VReplicationExec(ctx context.Context, in *tabletmanagerdata.VReplicationExecRequest, opts ...grpc.CallOption) (*tabletmanagerdata.VReplicationExecResponse, error)
 	VReplicationWaitForPos(ctx context.Context, in *tabletmanagerdata.VReplicationWaitForPosRequest, opts ...grpc.CallOption) (*tabletmanagerdata.VReplicationWaitForPosResponse, error)
+	UpdateSequenceTables(ctx context.Context, in *tabletmanagerdata.UpdateSequenceTablesRequest, opts ...grpc.CallOption) (*tabletmanagerdata.UpdateSequenceTablesResponse, error)
+	GetMaxValueForSequences(ctx context.Context, in *tabletmanagerdata.GetMaxValueForSequencesRequest, opts ...grpc.CallOption) (*tabletmanagerdata.GetMaxValueForSequencesResponse, error)
 	// VDiff API
 	VDiff(ctx context.Context, in *tabletmanagerdata.VDiffRequest, opts ...grpc.CallOption) (*tabletmanagerdata.VDiffResponse, error)
 	// ResetReplication makes the target not replicating
@@ -456,6 +460,15 @@ func (c *tabletManagerClient) StartReplication(ctx context.Context, in *tabletma
 	return out, nil
 }
 
+func (c *tabletManagerClient) RestartReplication(ctx context.Context, in *tabletmanagerdata.RestartReplicationRequest, opts ...grpc.CallOption) (*tabletmanagerdata.RestartReplicationResponse, error) {
+	out := new(tabletmanagerdata.RestartReplicationResponse)
+	err := c.cc.Invoke(ctx, "/tabletmanagerservice.TabletManager/RestartReplication", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tabletManagerClient) StartReplicationUntilAfter(ctx context.Context, in *tabletmanagerdata.StartReplicationUntilAfterRequest, opts ...grpc.CallOption) (*tabletmanagerdata.StartReplicationUntilAfterResponse, error) {
 	out := new(tabletmanagerdata.StartReplicationUntilAfterResponse)
 	err := c.cc.Invoke(ctx, "/tabletmanagerservice.TabletManager/StartReplicationUntilAfter", in, out, opts...)
@@ -567,6 +580,24 @@ func (c *tabletManagerClient) VReplicationExec(ctx context.Context, in *tabletma
 func (c *tabletManagerClient) VReplicationWaitForPos(ctx context.Context, in *tabletmanagerdata.VReplicationWaitForPosRequest, opts ...grpc.CallOption) (*tabletmanagerdata.VReplicationWaitForPosResponse, error) {
 	out := new(tabletmanagerdata.VReplicationWaitForPosResponse)
 	err := c.cc.Invoke(ctx, "/tabletmanagerservice.TabletManager/VReplicationWaitForPos", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tabletManagerClient) UpdateSequenceTables(ctx context.Context, in *tabletmanagerdata.UpdateSequenceTablesRequest, opts ...grpc.CallOption) (*tabletmanagerdata.UpdateSequenceTablesResponse, error) {
+	out := new(tabletmanagerdata.UpdateSequenceTablesResponse)
+	err := c.cc.Invoke(ctx, "/tabletmanagerservice.TabletManager/UpdateSequenceTables", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tabletManagerClient) GetMaxValueForSequences(ctx context.Context, in *tabletmanagerdata.GetMaxValueForSequencesRequest, opts ...grpc.CallOption) (*tabletmanagerdata.GetMaxValueForSequencesResponse, error) {
+	out := new(tabletmanagerdata.GetMaxValueForSequencesResponse)
+	err := c.cc.Invoke(ctx, "/tabletmanagerservice.TabletManager/GetMaxValueForSequences", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -846,6 +877,8 @@ type TabletManagerServer interface {
 	StopReplicationMinimum(context.Context, *tabletmanagerdata.StopReplicationMinimumRequest) (*tabletmanagerdata.StopReplicationMinimumResponse, error)
 	// StartReplication starts the mysql replication
 	StartReplication(context.Context, *tabletmanagerdata.StartReplicationRequest) (*tabletmanagerdata.StartReplicationResponse, error)
+	// RestartReplication stops and then starts the mysql replication
+	RestartReplication(context.Context, *tabletmanagerdata.RestartReplicationRequest) (*tabletmanagerdata.RestartReplicationResponse, error)
 	// StartReplicationUnitAfter starts the mysql replication until and including
 	// the provided position
 	StartReplicationUntilAfter(context.Context, *tabletmanagerdata.StartReplicationUntilAfterRequest) (*tabletmanagerdata.StartReplicationUntilAfterResponse, error)
@@ -863,6 +896,8 @@ type TabletManagerServer interface {
 	ValidateVReplicationPermissions(context.Context, *tabletmanagerdata.ValidateVReplicationPermissionsRequest) (*tabletmanagerdata.ValidateVReplicationPermissionsResponse, error)
 	VReplicationExec(context.Context, *tabletmanagerdata.VReplicationExecRequest) (*tabletmanagerdata.VReplicationExecResponse, error)
 	VReplicationWaitForPos(context.Context, *tabletmanagerdata.VReplicationWaitForPosRequest) (*tabletmanagerdata.VReplicationWaitForPosResponse, error)
+	UpdateSequenceTables(context.Context, *tabletmanagerdata.UpdateSequenceTablesRequest) (*tabletmanagerdata.UpdateSequenceTablesResponse, error)
+	GetMaxValueForSequences(context.Context, *tabletmanagerdata.GetMaxValueForSequencesRequest) (*tabletmanagerdata.GetMaxValueForSequencesResponse, error)
 	// VDiff API
 	VDiff(context.Context, *tabletmanagerdata.VDiffRequest) (*tabletmanagerdata.VDiffResponse, error)
 	// ResetReplication makes the target not replicating
@@ -1014,6 +1049,9 @@ func (UnimplementedTabletManagerServer) StopReplicationMinimum(context.Context, 
 func (UnimplementedTabletManagerServer) StartReplication(context.Context, *tabletmanagerdata.StartReplicationRequest) (*tabletmanagerdata.StartReplicationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartReplication not implemented")
 }
+func (UnimplementedTabletManagerServer) RestartReplication(context.Context, *tabletmanagerdata.RestartReplicationRequest) (*tabletmanagerdata.RestartReplicationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestartReplication not implemented")
+}
 func (UnimplementedTabletManagerServer) StartReplicationUntilAfter(context.Context, *tabletmanagerdata.StartReplicationUntilAfterRequest) (*tabletmanagerdata.StartReplicationUntilAfterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartReplicationUntilAfter not implemented")
 }
@@ -1052,6 +1090,12 @@ func (UnimplementedTabletManagerServer) VReplicationExec(context.Context, *table
 }
 func (UnimplementedTabletManagerServer) VReplicationWaitForPos(context.Context, *tabletmanagerdata.VReplicationWaitForPosRequest) (*tabletmanagerdata.VReplicationWaitForPosResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VReplicationWaitForPos not implemented")
+}
+func (UnimplementedTabletManagerServer) UpdateSequenceTables(context.Context, *tabletmanagerdata.UpdateSequenceTablesRequest) (*tabletmanagerdata.UpdateSequenceTablesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateSequenceTables not implemented")
+}
+func (UnimplementedTabletManagerServer) GetMaxValueForSequences(context.Context, *tabletmanagerdata.GetMaxValueForSequencesRequest) (*tabletmanagerdata.GetMaxValueForSequencesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMaxValueForSequences not implemented")
 }
 func (UnimplementedTabletManagerServer) VDiff(context.Context, *tabletmanagerdata.VDiffRequest) (*tabletmanagerdata.VDiffResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VDiff not implemented")
@@ -1753,6 +1797,24 @@ func _TabletManager_StartReplication_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TabletManager_RestartReplication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(tabletmanagerdata.RestartReplicationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TabletManagerServer).RestartReplication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/tabletmanagerservice.TabletManager/RestartReplication",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TabletManagerServer).RestartReplication(ctx, req.(*tabletmanagerdata.RestartReplicationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TabletManager_StartReplicationUntilAfter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(tabletmanagerdata.StartReplicationUntilAfterRequest)
 	if err := dec(in); err != nil {
@@ -1983,6 +2045,42 @@ func _TabletManager_VReplicationWaitForPos_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TabletManagerServer).VReplicationWaitForPos(ctx, req.(*tabletmanagerdata.VReplicationWaitForPosRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TabletManager_UpdateSequenceTables_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(tabletmanagerdata.UpdateSequenceTablesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TabletManagerServer).UpdateSequenceTables(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/tabletmanagerservice.TabletManager/UpdateSequenceTables",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TabletManagerServer).UpdateSequenceTables(ctx, req.(*tabletmanagerdata.UpdateSequenceTablesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TabletManager_GetMaxValueForSequences_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(tabletmanagerdata.GetMaxValueForSequencesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TabletManagerServer).GetMaxValueForSequences(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/tabletmanagerservice.TabletManager/GetMaxValueForSequences",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TabletManagerServer).GetMaxValueForSequences(ctx, req.(*tabletmanagerdata.GetMaxValueForSequencesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2483,6 +2581,10 @@ var TabletManager_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _TabletManager_StartReplication_Handler,
 		},
 		{
+			MethodName: "RestartReplication",
+			Handler:    _TabletManager_RestartReplication_Handler,
+		},
+		{
 			MethodName: "StartReplicationUntilAfter",
 			Handler:    _TabletManager_StartReplicationUntilAfter_Handler,
 		},
@@ -2533,6 +2635,14 @@ var TabletManager_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VReplicationWaitForPos",
 			Handler:    _TabletManager_VReplicationWaitForPos_Handler,
+		},
+		{
+			MethodName: "UpdateSequenceTables",
+			Handler:    _TabletManager_UpdateSequenceTables_Handler,
+		},
+		{
+			MethodName: "GetMaxValueForSequences",
+			Handler:    _TabletManager_GetMaxValueForSequences_Handler,
 		},
 		{
 			MethodName: "VDiff",

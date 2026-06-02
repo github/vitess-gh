@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
 	"vitess.io/vitess/go/mysql"
 	"vitess.io/vitess/go/test/endtoend/cluster"
 	tabletpb "vitess.io/vitess/go/vt/proto/topodata"
+	"vitess.io/vitess/go/vt/utils"
 	tmc "vitess.io/vitess/go/vt/vttablet/grpctmclient"
 )
 
@@ -39,6 +41,7 @@ var (
 	primaryTablet                    cluster.Vttablet
 	replicaTablet                    cluster.Vttablet
 	rdonlyTablet                     cluster.Vttablet
+	permissionsMu                    sync.Mutex
 	hostname                         = "localhost"
 	keyspaceName                     = "ks"
 	shardName                        = "0"
@@ -93,18 +96,18 @@ func TestMain(m *testing.M) {
 
 		// List of users authorized to execute vschema ddl operations
 		clusterInstance.VtGateExtraArgs = []string{
-			"--vschema_ddl_authorized_users=%",
+			"--vschema-ddl-authorized-users=%",
 			"--enable-views",
-			"--discovery_low_replication_lag", tabletUnhealthyThreshold.String(),
+			"--discovery-low-replication-lag", tabletUnhealthyThreshold.String(),
 		}
 		// Set extra tablet args for lock timeout
 		clusterInstance.VtTabletExtraArgs = []string{
-			"--lock_tables_timeout", "5s",
-			"--watch_replication_stream",
-			"--heartbeat_enable",
-			"--health_check_interval", tabletHealthcheckRefreshInterval.String(),
-			"--unhealthy_threshold", tabletUnhealthyThreshold.String(),
-			"--twopc_abandon_age", "200",
+			utils.GetFlagVariantForTests("--lock-tables-timeout"), "5s",
+			utils.GetFlagVariantForTests("--watch-replication-stream"),
+			utils.GetFlagVariantForTests("--heartbeat-enable"),
+			utils.GetFlagVariantForTests("--health-check-interval"), tabletHealthcheckRefreshInterval.String(),
+			utils.GetFlagVariantForTests("--unhealthy-threshold"), tabletUnhealthyThreshold.String(),
+			utils.GetFlagVariantForTests("--twopc-abandon-age"), "200",
 		}
 
 		// Start keyspace

@@ -69,6 +69,9 @@ func TestConnectionBilateralCleanup(t *testing.T) {
 
 To make sure tests are easy to read, we use testify assertions. Make sure to use assert.Eventually instead of using manual thread.sleep and timeouts.
 
+### Test Honesty
+- A test must actually exercise the condition its name and doc claim, must fail on `main` without the fix it guards, and must not duplicate coverage that a unit test already pins down precisely. Tests that pass identically with or without the fix waste CI time and create false confidence.
+
 ## :rotating_light: Error Handling Excellence
 
 Error handling is not an afterthought - it's core to reliable software.
@@ -157,6 +160,7 @@ return user.NeedsMigration() && migrate(user) || user
 - **Package naming** - Short, descriptive, lowercase without underscores
 - **Interface naming** - Single-method interfaces end in `-er` (Reader, Writer, Handler)
 - **Context first** - Always pass `context.Context` as the first parameter
+- **Context cancellation** - Prefer `context.WithoutCancel(ctx)` over `context.Background()` when you need a non-cancellable context but still want to preserve context values (tracing, caller ID)
 - **Channels for coordination** - Use channels to coordinate goroutines, not shared memory
 
 ## :mag: Dubugging & Troubleshooting

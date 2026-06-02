@@ -28,6 +28,7 @@ import (
 
 	"vitess.io/vitess/go/mysql"
 	"vitess.io/vitess/go/sqltypes"
+	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/vt/log"
 	vttablet "vitess.io/vitess/go/vt/vttablet/common"
 
@@ -179,6 +180,8 @@ func TestFKWorkflow(t *testing.T) {
 		require.Greater(t, t11Count, 1)
 		require.Greater(t, t12Count, 1)
 		require.Equal(t, t11Count, t12Count)
+		// Check for the secondary key
+		confirmTablesHaveSecondaryKeys(t, []*cluster.VttabletProcess{targetTab}, targetKeyspace, "parent")
 	}
 
 }

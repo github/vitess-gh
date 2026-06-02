@@ -46,7 +46,7 @@ const (
 	cellUsage             = "Vitess Cell name"
 	DefaultExternalDbData = ""
 	externalDbDataUsage   = "List of Data corresponding to external DBs. List of <external_db_name>,<DB_HOST>,<DB_PORT>,<DB_USER>,<DB_PASS>,<DB_CHARSET> separated by ';'"
-	DefaultTopologyFlags  = "--topo_implementation consul --topo_global_server_address consul1:8500 --topo_global_root vitess/global"
+	DefaultTopologyFlags  = "--topo-implementation consul --topo-global-server-address consul1:8500 --topo-global-root vitess/global"
 	topologyFlagsUsage    = "Vitess Topology Flags config"
 )
 
@@ -525,7 +525,7 @@ func generateExternalPrimary(
 - op: add
   path: /services/vttablet%[1]d
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15%[1]d:%[3]d"
       - "%[4]d"
@@ -587,7 +587,7 @@ func generateDefaultTablet(tabAlias int, shard, role, keyspace string, dbInfo ex
 - op: add
   path: /services/vttablet%[1]d
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
     - "15%[1]d:%[4]d"
     - "%[5]d"
@@ -625,19 +625,19 @@ func generateVtctld(opts vtOptions) string {
 - op: add
   path: /services/vtctld
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15000:%[1]d"
       - "%[2]d"
     command: ["sh", "-c", " /vt/bin/vtctld \
         %[3]s \
         --cell %[4]s \
-        --service_map 'grpc-vtctl,grpc-vtctld' \
-        --backup_storage_implementation file \
-        --file_backup_storage_root /vt/vtdataroot/backups \
+        --service-map 'grpc-vtctl,grpc-vtctld' \
+        --backup-storage-implementation file \
+        --file-backup-storage-root /vt/vtdataroot/backups \
         --logtostderr=true \
         --port %[1]d \
-        --grpc_port %[2]d \
+        --grpc-port %[2]d \
         "]
     volumes:
       - .:/script
@@ -656,7 +656,7 @@ func generateVtgate(opts vtOptions) string {
 - op: add
   path: /services/vtgate
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     ports:
       - "15099:%[1]d"
       - "%[2]d"
@@ -665,14 +665,14 @@ func generateVtgate(opts vtOptions) string {
         %[4]s \
         --logtostderr=true \
         --port %[1]d \
-        --grpc_port %[2]d \
-        --mysql_server_port %[3]d \
-        --mysql_auth_server_impl none \
+        --grpc-port %[2]d \
+        --mysql-server-port %[3]d \
+        --mysql-auth-server-impl none \
         --cell %[5]s \
-        --cells_to_watch %[5]s \
-        --tablet_types_to_wait PRIMARY,REPLICA,RDONLY \
-        --service_map 'grpc-vtgateservice' \
-        --normalize_queries=true \
+        --cells-to-watch %[5]s \
+        --tablet-types-to-wait PRIMARY,REPLICA,RDONLY \
+        --service-map 'grpc-vtgateservice' \
+        --normalize-queries=true \
         "]
     volumes:
       - .:/script
@@ -698,7 +698,7 @@ func generateVTOrc(dbInfo externalDbInfo, keyspaceInfoMap map[string]keyspaceInf
 - op: add
   path: /services/vtorc
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - ".:/script"
     environment:
@@ -723,7 +723,7 @@ func generateVreplication(dbInfo externalDbInfo, opts vtOptions) string {
 - op: add
   path: /services/vreplication
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - ".:/script"
     environment:
@@ -751,7 +751,7 @@ func generateSetKeyspaceDurabilityPolicy(
 - op: add
   path: /services/set_keyspace_durability_policy_%[3]s
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - ".:/script"
     environment:
@@ -788,7 +788,7 @@ func generateSchemaload(
 - op: add
   path: /services/schemaload_%[7]s
   value:
-    image: vitess/lite:v22.0.4
+    image: vitess/lite:v23.0.3
     volumes:
       - ".:/script"
     environment:

@@ -203,7 +203,7 @@ func InitTabletMap(
 	// Do this before any tablets are created so that they respect the protocol,
 	// otherwise it defaults to grpc.
 	//
-	// main() forces the --tablet_manager_protocol flag to this value.
+	// main() forces the --tablet-manager-protocol flag to this value.
 	tmclient.RegisterTabletManagerClientFactory("internal", func() tmclient.TabletManagerClient {
 		return &internalTabletManagerClient{}
 	})
@@ -224,7 +224,7 @@ func InitTabletMap(
 		return 0, fmt.Errorf("RebuildVSchemaGraph failed: %v", err)
 	}
 
-	// Register the tablet dialer for tablet server. main() forces the --tablet_protocol
+	// Register the tablet dialer for tablet server. main() forces the --tablet-protocol
 	// flag to this value.
 	tabletconn.RegisterDialer("internal", dialer)
 
@@ -993,6 +993,14 @@ func (itmc *internalTabletManagerClient) UpdateVReplicationWorkflows(context.Con
 	return nil, fmt.Errorf("not implemented in vtcombo")
 }
 
+func (itmc *internalTabletManagerClient) UpdateSequenceTables(ctx context.Context, tablet *topodatapb.Tablet, request *tabletmanagerdatapb.UpdateSequenceTablesRequest) (*tabletmanagerdatapb.UpdateSequenceTablesResponse, error) {
+	return nil, fmt.Errorf("not implemented in vtcombo")
+}
+
+func (itmc *internalTabletManagerClient) GetMaxValueForSequences(ctx context.Context, tablet *topodatapb.Tablet, request *tabletmanagerdatapb.GetMaxValueForSequencesRequest) (*tabletmanagerdatapb.GetMaxValueForSequencesResponse, error) {
+	return nil, fmt.Errorf("not implemented in vtcombo")
+}
+
 func (itmc *internalTabletManagerClient) ResetReplication(context.Context, *topodatapb.Tablet) error {
 	return fmt.Errorf("not implemented in vtcombo")
 }
@@ -1066,6 +1074,10 @@ func (itmc *internalTabletManagerClient) StopReplicationMinimum(context.Context,
 }
 
 func (itmc *internalTabletManagerClient) StartReplication(context.Context, *topodatapb.Tablet, bool) error {
+	return fmt.Errorf("not implemented in vtcombo")
+}
+
+func (itmc *internalTabletManagerClient) RestartReplication(context.Context, *topodatapb.Tablet, bool) error {
 	return fmt.Errorf("not implemented in vtcombo")
 }
 

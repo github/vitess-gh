@@ -36,6 +36,7 @@ import (
 	"vitess.io/vitess/go/vt/tableacl/simpleacl"
 	"vitess.io/vitess/go/vt/topo"
 	"vitess.io/vitess/go/vt/topo/topoproto"
+	"vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/vtenv"
 	"vitess.io/vitess/go/vt/vttablet/tabletmanager"
 	"vitess.io/vitess/go/vt/vttablet/tabletmanager/semisyncmonitor"
@@ -65,7 +66,7 @@ var (
 * Managed MySQL (most common)
 * External MySQL
 
-In addition to these deployment types, a partially managed VTTablet is also possible by setting ` + "`--disable_active_reparents`." + `
+In addition to these deployment types, a partially managed VTTablet is also possible by setting ` + "`--disable-active-reparents`." + `
 
 ### Managed MySQL
 
@@ -81,20 +82,20 @@ Even if a MySQL is external, you can still make vttablet perform some management
 
 ` +
 			"* `--unmanaged`: This flag indicates that this tablet is running in unmanaged mode. In this mode, any reparent or replica commands are not allowed. These are InitShardPrimary, PlannedReparentShard, EmergencyReparentShard, and ReparentTablet. You should use the TabletExternallyReparented command to inform vitess of the current primary.\n" +
-			"* `--replication_connect_retry`: This value is give to mysql when it connects a replica to the primary as the retry duration parameter.\n" +
-			"* `--heartbeat_enable` and `--heartbeat_interval duration`: cause vttablet to write heartbeats to the sidecar database. This information is also used by the replication reporter to assess replica lag.\n",
+			"* `--replication-connect-retry`: This value is give to mysql when it connects a replica to the primary as the retry duration parameter.\n" +
+			"* `--heartbeat-enable` and `--heartbeat-interval duration`: cause vttablet to write heartbeats to the sidecar database. This information is also used by the replication reporter to assess replica lag.\n",
 		Example: `
 vttablet \
-	--topo_implementation etcd2 \
-	--topo_global_server_address localhost:2379 \
-	--topo_global_root /vitess/ \
+	--topo-implementation etcd2 \
+	--topo-global-server-address localhost:2379 \
+	--topo-global-root /vitess/ \
 	--tablet-path $alias \
-	--init_keyspace $keyspace \
-	--init_shard $shard \
-	--init_tablet_type $tablet_type \
+	--init-keyspace $keyspace \
+	--init-shard $shard \
+	--init-tablet-type $tablet_type \
 	--port $port \
-	--grpc_port $grpc_port \
-	--service_map 'grpc-queryservice,grpc-tabletmanager,grpc-updatestream'` + "\n\n`$alias` needs to be of the form: `<cell>-id`, and the cell should match one of the local cells that was created in the topology. The id can be left padded with zeroes: `cell-100` and `cell-000000100` are synonymous.",
+	--grpc-port $grpc_port \
+	--service-map 'grpc-queryservice,grpc-tabletmanager,grpc-updatestream'` + "\n\n`$alias` needs to be of the form: `<cell>-id`, and the cell should match one of the local cells that was created in the topology. The id can be left padded with zeroes: `cell-100` and `cell-000000100` are synonymous.",
 		Args:    cobra.NoArgs,
 		Version: servenv.AppVersion.String(),
 		PreRunE: servenv.CobraPreRunE,
@@ -274,5 +275,5 @@ func init() {
 	Main.Flags().StringVar(&tableACLConfig, "table-acl-config", tableACLConfig, "path to table access checker config file; send SIGHUP to reload this file")
 	Main.Flags().DurationVar(&tableACLConfigReloadInterval, "table-acl-config-reload-interval", tableACLConfigReloadInterval, "Ticker to reload ACLs. Duration flag, format e.g.: 30s. Default: do not reload")
 	Main.Flags().StringVar(&tabletPath, "tablet-path", tabletPath, "tablet alias")
-	Main.Flags().StringVar(&tabletConfig, "tablet_config", tabletConfig, "YAML file config for tablet")
+	utils.SetFlagStringVar(Main.Flags(), &tabletConfig, "tablet-config", tabletConfig, "YAML file config for tablet")
 }

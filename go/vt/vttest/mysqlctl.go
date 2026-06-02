@@ -64,10 +64,10 @@ func (ctl *Mysqlctl) Setup() error {
 	cmd := exec.CommandContext(ctx,
 		ctl.Binary,
 		"--alsologtostderr",
-		"--tablet_uid", fmt.Sprintf("%d", ctl.UID),
-		"--mysql_port", fmt.Sprintf("%d", ctl.Port),
+		"--tablet-uid", fmt.Sprintf("%d", ctl.UID),
+		"--mysql-port", fmt.Sprintf("%d", ctl.Port),
 		"init",
-		"--init_db_sql_file", ctl.InitFile,
+		"--init-db-sql-file", ctl.InitFile,
 	)
 
 	myCnf := strings.Join(ctl.MyCnf, ":")
@@ -89,8 +89,8 @@ func (ctl *Mysqlctl) Start() error {
 	cmd := exec.CommandContext(ctx,
 		ctl.Binary,
 		"--alsologtostderr",
-		"--tablet_uid", fmt.Sprintf("%d", ctl.UID),
-		"--mysql_port", fmt.Sprintf("%d", ctl.Port),
+		"--tablet-uid", fmt.Sprintf("%d", ctl.UID),
+		"--mysql-port", fmt.Sprintf("%d", ctl.Port),
 		"start",
 	)
 
@@ -112,8 +112,8 @@ func (ctl *Mysqlctl) TearDown() error {
 	cmd := exec.CommandContext(ctx,
 		ctl.Binary,
 		"--alsologtostderr",
-		"--tablet_uid", fmt.Sprintf("%d", ctl.UID),
-		"--mysql_port", fmt.Sprintf("%d", ctl.Port),
+		"--tablet-uid", fmt.Sprintf("%d", ctl.UID),
+		"--mysql-port", fmt.Sprintf("%d", ctl.Port),
 		"shutdown",
 	)
 

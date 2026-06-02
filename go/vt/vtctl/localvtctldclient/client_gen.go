@@ -642,6 +642,11 @@ func (client *localVtctldClient) SetShardTabletControl(ctx context.Context, in *
 	return client.s.SetShardTabletControl(ctx, in)
 }
 
+// SetVtorcEmergencyReparent is part of the vtctlservicepb.VtctldClient interface.
+func (client *localVtctldClient) SetVtorcEmergencyReparent(ctx context.Context, in *vtctldatapb.SetVtorcEmergencyReparentRequest, opts ...grpc.CallOption) (*vtctldatapb.SetVtorcEmergencyReparentResponse, error) {
+	return client.s.SetVtorcEmergencyReparent(ctx, in)
+}
+
 // SetWritable is part of the vtctlservicepb.VtctldClient interface.
 func (client *localVtctldClient) SetWritable(ctx context.Context, in *vtctldatapb.SetWritableRequest, opts ...grpc.CallOption) (*vtctldatapb.SetWritableResponse, error) {
 	return client.s.SetWritable(ctx, in)
@@ -775,6 +780,11 @@ func (client *localVtctldClient) ValidateVersionKeyspace(ctx context.Context, in
 // ValidateVersionShard is part of the vtctlservicepb.VtctldClient interface.
 func (client *localVtctldClient) ValidateVersionShard(ctx context.Context, in *vtctldatapb.ValidateVersionShardRequest, opts ...grpc.CallOption) (*vtctldatapb.ValidateVersionShardResponse, error) {
 	return client.s.ValidateVersionShard(ctx, in)
+}
+
+// WorkflowAddTables is part of the vtctlservicepb.VtctldClient interface.
+func (client *localVtctldClient) WorkflowAddTables(ctx context.Context, in *vtctldatapb.WorkflowAddTablesRequest, opts ...grpc.CallOption) (*vtctldatapb.WorkflowAddTablesResponse, error) {
+	return client.s.WorkflowAddTables(ctx, in)
 }
 
 // WorkflowDelete is part of the vtctlservicepb.VtctldClient interface.

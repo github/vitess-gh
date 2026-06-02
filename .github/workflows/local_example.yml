@@ -17,7 +17,7 @@ jobs:
 
   build:
     name: Local example using ${{ matrix.topo }} on Ubuntu
-    runs-on: ${{ github.repository == 'vitessio/vitess' && 'gh-hosted-runners-16cores-1-24.04' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-16cpu-64gb-x86-64' || 'ubuntu-24.04' }}
     strategy:
       matrix:
         topo: [etcd,zk2]
@@ -95,12 +95,3 @@ jobs:
           export PATH="/usr/local/opt/mysql@5.7/bin:$PATH"
         fi
         go run test.go -print-log -follow -pull=false -flavor=${{ env.BOOTSTRAP_FLAVOR }} -bootstrap-version=${{ env.BOOTSTRAP_VERSION }} local_example
-
-  consul:
-    name: Local example using consul on Ubuntu
-    runs-on: ubuntu-latest
-    steps:
-    - name: Consul test currently broken
-      run: |
-        echo "Consul test is currently broken - this job exists to satisfy the required check"
-        exit 0

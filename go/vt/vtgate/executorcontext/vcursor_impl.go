@@ -28,8 +28,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
 
-	"vitess.io/vitess/go/vt/sysvars"
-
 	"vitess.io/vitess/go/mysql/collations"
 	"vitess.io/vitess/go/mysql/config"
 	"vitess.io/vitess/go/mysql/sqlerror"
@@ -47,6 +45,7 @@ import (
 	vtrpcpb "vitess.io/vitess/go/vt/proto/vtrpc"
 	"vitess.io/vitess/go/vt/sqlparser"
 	"vitess.io/vitess/go/vt/srvtopo"
+	"vitess.io/vitess/go/vt/sysvars"
 	"vitess.io/vitess/go/vt/topo"
 	topoprotopb "vitess.io/vitess/go/vt/topo/topoproto"
 	"vitess.io/vitess/go/vt/topotools"
@@ -145,6 +144,10 @@ type (
 		) ([]*srvtopo.ResolvedShard, [][][]sqltypes.Value, error)
 	}
 
+	Metrics interface {
+		GetExecutionMetrics() *engine.Metrics
+	}
+
 	// VCursorImpl implements the VCursor functionality used by dependent
 	// packages to call back into VTGate.
 	VCursorImpl struct {
@@ -158,6 +161,7 @@ type (
 		resolver       Resolver
 		topoServer     *topo.Server
 		logStats       *logstats.LogStats
+		metrics        Metrics
 
 		// fkChecksState stores the state of foreign key checks variable.
 		// This state is meant to be the final fk checks state after consulting the
@@ -169,6 +173,7 @@ type (
 		vm                  VSchemaOperator
 		semTable            *semantics.SemTable
 		queryTimeout        time.Duration
+		transactionTimeout  time.Duration
 
 		warnings []*querypb.QueryWarning // any warnings that are accumulated during the planning phase are stored here
 
@@ -201,6 +206,7 @@ func NewVCursorImpl(
 	serv srvtopo.Server,
 	observer ResultsObserver,
 	cfg VCursorConfig,
+	metrics Metrics,
 ) (*VCursorImpl, error) {
 	keyspace, tabletType, destination, err := ParseDestinationTarget(safeSession.TargetString, cfg.DefaultTabletType, vschema)
 	if err != nil {
@@ -226,12 +232,13 @@ func NewVCursorImpl(
 		marginComments: marginComments,
 		executor:       executor,
 		logStats:       logStats,
-		resolver:       resolver,
-		vschema:        vschema,
-		vm:             vm,
-		topoServer:     ts,
+		metrics:        metrics,
 
-		observer: observer,
+		resolver:   resolver,
+		vschema:    vschema,
+		vm:         vm,
+		topoServer: ts,
+		observer:   observer,
 	}, nil
 }
 
@@ -262,16 +269,18 @@ func (vc *VCursorImpl) CloneForMirroring(ctx context.Context) engine.VCursor {
 	clonedCtx := callerid.NewContext(ctx, callerId, immediateCallerId)
 
 	v := &VCursorImpl{
-		config:              vc.config,
-		SafeSession:         NewAutocommitSession(vc.SafeSession.Session),
-		keyspace:            vc.keyspace,
-		tabletType:          vc.tabletType,
-		destination:         vc.destination,
-		marginComments:      vc.marginComments,
-		executor:            vc.executor,
-		resolver:            vc.resolver,
-		topoServer:          vc.topoServer,
-		logStats:            &logstats.LogStats{Ctx: clonedCtx},
+		config:         vc.config,
+		SafeSession:    NewAutocommitSession(vc.SafeSession.Session),
+		keyspace:       vc.keyspace,
+		tabletType:     vc.tabletType,
+		destination:    vc.destination,
+		marginComments: vc.marginComments,
+		executor:       vc.executor,
+		resolver:       vc.resolver,
+		topoServer:     vc.topoServer,
+		logStats:       &logstats.LogStats{Ctx: clonedCtx},
+		metrics:        vc.metrics,
+
 		ignoreMaxMemoryRows: vc.ignoreMaxMemoryRows,
 		vschema:             vc.vschema,
 		vm:                  vc.vm,
@@ -297,6 +306,7 @@ func (vc *VCursorImpl) CloneForReplicaWarming(ctx context.Context) engine.VCurso
 		resolver:       vc.resolver,
 		topoServer:     vc.topoServer,
 		logStats:       &logstats.LogStats{},
+		metrics:        vc.metrics,
 
 		ignoreMaxMemoryRows: vc.ignoreMaxMemoryRows,
 		vschema:             vc.vschema,
@@ -335,12 +345,19 @@ func (vc *VCursorImpl) cloneWithAutocommitSession() *VCursorImpl {
 		marginComments: vc.marginComments,
 		executor:       vc.executor,
 		logStats:       vc.logStats,
-		resolver:       vc.resolver,
-		vschema:        vc.vschema,
-		vm:             vc.vm,
-		topoServer:     vc.topoServer,
-		observer:       vc.observer,
+		metrics:        vc.metrics,
+
+		resolver:   vc.resolver,
+		vschema:    vc.vschema,
+		vm:         vc.vm,
+		topoServer: vc.topoServer,
+		observer:   vc.observer,
 	}
+}
+
+// GetExecutionMetrics provides the execution metrics object.
+func (vc *VCursorImpl) GetExecutionMetrics() *engine.Metrics {
+	return vc.metrics.GetExecutionMetrics()
 }
 
 // HasSystemVariables returns whether the session has set system variables or not
@@ -831,11 +848,13 @@ func (vc *VCursorImpl) markSavepoint(ctx context.Context, needsRollbackOnParialE
 	}
 	uID := fmt.Sprintf("_vt%s", strings.ReplaceAll(uuid.NewString(), "-", "_"))
 	spQuery := fmt.Sprintf("%ssavepoint %s%s", vc.marginComments.Leading, uID, vc.marginComments.Trailing)
+	vc.SafeSession.SetExecReadQuery(true)
 	_, err := vc.executor.Execute(ctx, nil, "MarkSavepoint", vc.SafeSession, spQuery, bindVars, false)
 	if err != nil {
 		return err
 	}
 	vc.SafeSession.SetSavepoint(uID)
+	vc.SafeSession.SetExecReadQuery(false)
 	return nil
 }
 
@@ -915,11 +934,11 @@ func (vc *VCursorImpl) ExecuteKeyspaceID(ctx context.Context, keyspace string, k
 	// This function is only called from consistent_lookup vindex when the lookup row getting inserting finds a duplicate.
 	// In such scenario, original row needs to be locked to check if it already exists or no other transaction is working on it or does not write to it.
 	// This creates a transaction but that transaction is for locking purpose only and should not cause multi-db transaction error.
-	// This fields helps in to ignore multi-db transaction error when it states `queryFromVindex`.
+	// This fields helps in to ignore multi-db transaction error when it states `execReadQuery`.
 	if !rollbackOnError {
-		vc.SafeSession.SetQueryFromVindex(true)
+		vc.SafeSession.SetExecReadQuery(true)
 		defer func() {
-			vc.SafeSession.SetQueryFromVindex(false)
+			vc.SafeSession.SetExecReadQuery(false)
 		}()
 	}
 	qr, errs := vc.ExecuteMultiShard(ctx, nil, rss, queries, rollbackOnError, autocommit, false)
@@ -1139,6 +1158,11 @@ func (vc *VCursorImpl) SetAutocommit(ctx context.Context, autocommit bool) error
 // SetQueryTimeout implements the SessionActions interface
 func (vc *VCursorImpl) SetQueryTimeout(maxExecutionTime int64) {
 	vc.SafeSession.QueryTimeout = maxExecutionTime
+}
+
+// SetTransactionTimeout implements the SessionActions interface
+func (vc *VCursorImpl) SetTransactionTimeout(transactionTimeout int64) {
+	vc.SafeSession.GetOrCreateOptions().TransactionTimeout = &transactionTimeout
 }
 
 // SetClientFoundRows implements the SessionActions interface

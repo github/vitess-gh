@@ -18,6 +18,7 @@ package mysqlctl
 
 import (
 	"context"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -26,10 +27,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"vitess.io/vitess/go/mysql/fakesqldb"
+	"vitess.io/vitess/go/protoutil"
 	"vitess.io/vitess/go/sqltypes"
 	"vitess.io/vitess/go/vt/dbconfigs"
+	_ "vitess.io/vitess/go/vt/mysqlctl/grpcmysqlctlclient"
+	mysqlctlpb "vitess.io/vitess/go/vt/proto/mysqlctl"
 )
 
 type testcase struct {
@@ -116,6 +121,75 @@ func TestParseVersionString(t *testing.T) {
 		}
 	}
 
+}
+
+// shutdownRecordingMysqlCtlServer records remote Shutdown requests from Mysqld.
+type shutdownRecordingMysqlCtlServer struct {
+	mysqlctlpb.UnimplementedMysqlCtlServer
+
+	// shutdownRequests carries the remote shutdown request.
+	shutdownRequests chan *mysqlctlpb.ShutdownRequest
+}
+
+// Shutdown records the request and returns a successful response.
+func (s *shutdownRecordingMysqlCtlServer) Shutdown(ctx context.Context, request *mysqlctlpb.ShutdownRequest) (*mysqlctlpb.ShutdownResponse, error) {
+	s.shutdownRequests <- request
+
+	return &mysqlctlpb.ShutdownResponse{}, nil
+}
+
+// TestMysqldShutdownForwardsTimeoutToRemoteMysqlctld verifies that the remote
+// shutdown path preserves the caller's timeout.
+func TestMysqldShutdownForwardsTimeoutToRemoteMysqlctld(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	oldSocketFile := socketFile
+	t.Cleanup(func() {
+		socketFile = oldSocketFile
+	})
+
+	tempSocketFile, err := os.CreateTemp("/tmp", "mysqlctld-*.sock")
+	require.NoError(t, err)
+	require.NoError(t, tempSocketFile.Close())
+	require.NoError(t, os.Remove(tempSocketFile.Name()))
+	t.Cleanup(func() {
+		_ = os.Remove(tempSocketFile.Name())
+	})
+
+	socketPath := tempSocketFile.Name()
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+
+	server := grpc.NewServer()
+	t.Cleanup(server.Stop)
+
+	recordingServer := &shutdownRecordingMysqlCtlServer{
+		shutdownRequests: make(chan *mysqlctlpb.ShutdownRequest, 1),
+	}
+	mysqlctlpb.RegisterMysqlCtlServer(server, recordingServer)
+
+	go func() { _ = server.Serve(listener) }()
+
+	socketFile = socketPath
+	shutdownTimeout := 43*time.Second + 125*time.Millisecond
+
+	mysqld := &Mysqld{}
+	err = mysqld.Shutdown(ctx, &Mycnf{}, true, shutdownTimeout)
+	require.NoError(t, err)
+
+	var request *mysqlctlpb.ShutdownRequest
+	select {
+	case request = <-recordingServer.shutdownRequests:
+	case <-ctx.Done():
+		require.Failf(t, "timed out waiting for remote shutdown request", "context error: %v", ctx.Err())
+	}
+	assert.True(t, request.WaitForMysqld)
+
+	gotTimeout, ok, err := protoutil.DurationFromProto(request.MysqlShutdownTimeout)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, shutdownTimeout, gotTimeout)
 }
 
 func TestRegexps(t *testing.T) {
@@ -321,4 +395,41 @@ func TestHostMetrics(t *testing.T) {
 	metric := resp.Metrics["datadir-used-ratio"]
 	assert.Equal(t, "datadir-used-ratio", metric.Name)
 	assert.Empty(t, metric.Error)
+}
+
+func TestGetMycnfTemplateMySQL9(t *testing.T) {
+	db := fakesqldb.New(t)
+	defer db.Close()
+
+	params := db.ConnParams()
+	cp := *params
+	dbc := dbconfigs.NewTestDBConfigs(cp, cp, "fakesqldb")
+
+	testMysqld := NewMysqld(dbc)
+	defer testMysqld.Close()
+
+	// Test MySQL 9.0
+	testMysqld.capabilities = newCapabilitySet(FlavorMySQL, ServerVersion{Major: 9, Minor: 0, Patch: 0})
+	template := testMysqld.getMycnfTemplate()
+	assert.Contains(t, template, "[mysqld]")
+	// Should use MySQL 9.0 config for MySQL 9.x
+	assert.Contains(t, template, "# This file is auto-included when MySQL 9.0 or later is detected.")
+	assert.NotContains(t, template, "mysql_native_password = ON")
+
+	// Test MySQL 9.1
+	testMysqld.capabilities = newCapabilitySet(FlavorMySQL, ServerVersion{Major: 9, Minor: 1, Patch: 5})
+	template = testMysqld.getMycnfTemplate()
+	assert.Contains(t, template, "[mysqld]")
+	// Should use MySQL 9.0 config for MySQL 9.x
+	assert.Contains(t, template, "# This file is auto-included when MySQL 9.0 or later is detected.")
+	assert.NotContains(t, template, "mysql_native_password = ON")
+}
+
+func TestBuildLdPathsTZ(t *testing.T) {
+	os.Setenv("TZ", "Europe/Berlin")
+	defer os.Unsetenv("TZ")
+
+	env, err := buildLdPaths()
+	assert.NoError(t, err)
+	assert.Contains(t, env, "TZ=Europe/Berlin")
 }

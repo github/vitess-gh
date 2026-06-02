@@ -1,4 +1,12 @@
 ## v21.0
+* **[21.0.5](21.0.5)**
+	* [Changelog](21.0.5/changelog.md)
+	* [Release Notes](21.0.5/release_notes.md)
+
+* **[21.0.4](21.0.4)**
+	* [Changelog](21.0.4/changelog.md)
+	* [Release Notes](21.0.4/release_notes.md)
+
 * **[21.0.3](21.0.3)**
 	* [Changelog](21.0.3/changelog.md)
 	* [Release Notes](21.0.3/release_notes.md)

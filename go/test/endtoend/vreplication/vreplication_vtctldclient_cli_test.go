@@ -32,6 +32,7 @@ import (
 	"vitess.io/vitess/go/json2"
 	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/vt/topo/topoproto"
+	"vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/wrangler"
 
 	binlogdatapb "vitess.io/vitess/go/vt/proto/binlogdata"
@@ -153,11 +154,11 @@ func TestVtctldclientCLI(t *testing.T) {
 		require.NotNil(t, targetReplicaTab1)
 
 		overrides := map[string]string{
-			"vreplication_copy_phase_duration":     "10h11m12s",
-			"vreplication_experimental_flags":      "7",
-			"vreplication-parallel-insert-workers": "4",
-			"vreplication_net_read_timeout":        "6000",
-			"relay_log_max_items":                  "10000",
+			"vreplication-copy-phase-duration":                  "10h11m12s",
+			"vreplication-experimental-flags":                   "7",
+			"vreplication-parallel-insert-workers":              "4",
+			"vreplication-net-read-timeout":                     "6000",
+			utils.GetFlagVariantForTests("relay-log-max-items"): "10000",
 		}
 		createFlags := []string{"--auto-start=false", "--defer-secondary-keys=false",
 			"--on-ddl", "STOP", "--tablet-types", "primary,rdonly", "--tablet-types-in-preference-order=true",
@@ -223,9 +224,9 @@ func TestVtctldclientCLI(t *testing.T) {
 func testMoveTablesFlags1(t *testing.T, mt *iMoveTables, sourceKeyspace, targetKeyspace, defaultWorkflowName string, targetTabs map[string]*cluster.VttabletProcess) {
 	tables := "customer,customer2"
 	overrides := map[string]string{
-		"vreplication_net_read_timeout":        "6000",
-		"relay_log_max_items":                  "10000",
-		"vreplication-parallel-insert-workers": "10",
+		"vreplication-net-read-timeout":                     "6000",
+		utils.GetFlagVariantForTests("relay-log-max-items"): "10000",
+		"vreplication-parallel-insert-workers":              "10",
 	}
 	createFlags := []string{"--auto-start=false", "--defer-secondary-keys=false", "--stop-after-copy",
 		"--no-routing-rules", "--on-ddl", "STOP", "--exclude-tables", "customer2",
@@ -465,29 +466,29 @@ func testWorkflowUpdateConfig(t *testing.T, mt *iMoveTables, targetTabs map[stri
 		{
 			name: "one value",
 			config: map[string]string{
-				"vreplication_heartbeat_update_interval": "10",
+				"vreplication-heartbeat-update-interval": "10",
 			},
 		},
 		{
 			name: "two values",
 			config: map[string]string{
-				"vreplication_heartbeat_update_interval": "100",
-				"vreplication_store_compressed_gtid":     "true",
+				"vreplication-heartbeat-update-interval": "100",
+				"vreplication-store-compressed-gtid":     "true",
 			},
 		},
 		{
 			name: "invalid value",
 			config: map[string]string{
-				"vreplication_heartbeat_update_interval": "12s",
-				"vreplication_store_compressed_gtid":     "true",
+				"vreplication-heartbeat-update-interval": "12s",
+				"vreplication-store-compressed-gtid":     "true",
 			},
 			needError: true,
 		},
 		{
 			name: "unknown flag",
 			config: map[string]string{
-				"vreplication_heartbeat_update_interval": "1",
-				"vreplication_store_compressed_gtid":     "true",
+				"vreplication-heartbeat-update-interval": "1",
+				"vreplication-store-compressed-gtid":     "true",
 				"unknown":                                "value",
 			},
 			needError: true,
@@ -495,8 +496,8 @@ func testWorkflowUpdateConfig(t *testing.T, mt *iMoveTables, targetTabs map[stri
 		{
 			name: "clear flags",
 			config: map[string]string{
-				"vreplication_heartbeat_update_interval": "",
-				"vreplication_store_compressed_gtid":     "",
+				"vreplication-heartbeat-update-interval": "",
+				"vreplication-store-compressed-gtid":     "",
 			},
 			clears: true,
 		},
@@ -546,11 +547,11 @@ func createMoveTables(t *testing.T, sourceKeyspace, targetKeyspace, defaultWorkf
 
 func splitShard(t *testing.T, keyspace, defaultWorkflowName, sourceShards, targetShards string, targetTabs map[string]*cluster.VttabletProcess) {
 	overrides := map[string]string{
-		"vreplication_copy_phase_duration":     "10h11m12s",
-		"vreplication_experimental_flags":      "7",
-		"vreplication-parallel-insert-workers": "4",
-		"vreplication_net_read_timeout":        "6000",
-		"relay_log_max_items":                  "10000",
+		"vreplication-copy-phase-duration":                  "10h11m12s",
+		"vreplication-experimental-flags":                   "7",
+		"vreplication-parallel-insert-workers":              "4",
+		"vreplication-net-read-timeout":                     "6000",
+		utils.GetFlagVariantForTests("relay-log-max-items"): "10000",
 	}
 	createFlags := []string{"--auto-start=false", "--defer-secondary-keys=false", "--stop-after-copy",
 		"--on-ddl", "STOP", "--tablet-types", "primary,rdonly", "--tablet-types-in-preference-order=true",

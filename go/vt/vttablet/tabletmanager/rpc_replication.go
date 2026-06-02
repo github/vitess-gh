@@ -308,6 +308,35 @@ func (tm *TabletManager) StartReplication(ctx context.Context, semiSync bool) er
 	return tm.startReplicationRecoverable(ctx)
 }
 
+// RestartReplication will stop replication and then start it again
+func (tm *TabletManager) RestartReplication(ctx context.Context, semiSync bool) error {
+	log.Infof("RestartReplication")
+	if err := tm.waitForGrantsToHaveApplied(ctx); err != nil {
+		return err
+	}
+	if err := tm.lock(ctx); err != nil {
+		return err
+	}
+	defer tm.unlock()
+
+	// Stop replication first
+	if err := tm.stopReplicationLocked(ctx); err != nil {
+		return err
+	}
+
+	semiSyncAction, err := tm.convertBoolToSemiSyncAction(ctx, semiSync)
+	if err != nil {
+		return err
+	}
+
+	if err := tm.fixSemiSync(ctx, tm.Tablet().Type, semiSyncAction); err != nil {
+		return err
+	}
+
+	// Start replication
+	return tm.startReplicationRecoverable(ctx)
+}
+
 // StartReplicationUntilAfter will start the replication and let it catch up
 // until and including the transactions in `position`
 func (tm *TabletManager) StartReplicationUntilAfter(ctx context.Context, position string, waitTime time.Duration) error {
@@ -495,7 +524,6 @@ func (tm *TabletManager) InitReplica(ctx context.Context, parent *topodatapb.Tab
 	if err := tm.MysqlDaemon.SetReplicationPosition(ctx, pos); err != nil {
 		return err
 	}
-
 	if err := tm.setReplicationSourceRecoverable(ctx, ti.Tablet.MysqlHostname, ti.Tablet.MysqlPort, 0, false, true); err != nil {
 		return err
 	}
@@ -1238,9 +1266,10 @@ func (tm *TabletManager) setReplicationSourceRecoverable(ctx context.Context, ho
 	}
 
 	log.Warningf(
-		"Encountered recoverable replication initialization error while changing replication source, resetting "+
-			"replication parameters and reapplying source: source_host=%s, source_port=%d, error=%v",
-		host, port, err,
+		"Encountered recoverable replication initialization error while changing replication source, resetting replication parameters and reapplying source: source_host=%s source_port=%d error=%v",
+		host,
+		port,
+		err,
 	)
 
 	// If the replica was running when the source-change attempt failed, stop it
@@ -1300,7 +1329,7 @@ func (tm *TabletManager) handleRecoverableReplicationInitError(ctx context.Conte
 	// see https://bugs.mysql.com/bug.php?id=83713 or https://github.com/vitessio/vitess/issues/5067
 	// The same fix also works for https://github.com/vitessio/vitess/issues/10955.
 	if isRecoverableReplicationInitializationError(err) {
-		log.Warningf("Encountered recoverable replication initialization error, restarting replication: %v", err)
+		log.Warningf("Encountered recoverable replication initialization error, restarting replication: error=%v", err)
 
 		if err := tm.MysqlDaemon.RestartReplication(ctx, tm.hookExtraEnv()); err != nil {
 			return err

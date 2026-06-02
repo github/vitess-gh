@@ -361,6 +361,7 @@ func (vs *vstream) sendEvents(ctx context.Context) {
 
 	send := func(evs []*binlogdatapb.VEvent) error {
 		if err := vs.send(evs); err != nil {
+			log.Infof("Error in vstream send (wrapper) to client: %v", err)
 			vs.once.Do(func() {
 				vs.setError(err, "error sending events")
 			})
@@ -372,12 +373,14 @@ func (vs *vstream) sendEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Infof("vstream context canceled")
 			vs.once.Do(func() {
 				vs.setError(ctx.Err(), "context ended while sending events")
 			})
 			return
 		case evs := <-vs.eventCh:
 			if err := send(evs); err != nil {
+				log.Infof("Error in vstream send events to client: %v", err)
 				vs.once.Do(func() {
 					vs.setError(err, "error sending events")
 				})
@@ -392,6 +395,7 @@ func (vs *vstream) sendEvents(ctx context.Context) {
 				CurrentTime: now,
 			}}
 			if err := send(evs); err != nil {
+				log.Infof("Error in vstream sending heartbeat to client: %v", err)
 				vs.once.Do(func() {
 					vs.setError(err, "error sending heartbeat")
 				})
@@ -417,7 +421,7 @@ func (vs *vstream) startOneStream(ctx context.Context, sgtid *binlogdatapb.Shard
 
 		// Set the error on exit. First one wins.
 		if err != nil {
-			log.Errorf("Error in vstream for %+v: %s", sgtid, err)
+			log.Errorf("Error in vstream for %+v: %v", sgtid, err)
 			// Get the original/base error.
 			uerr := vterrors.UnwrapAll(err)
 			if !errors.Is(uerr, context.Canceled) && !errors.Is(uerr, context.DeadlineExceeded) {
@@ -649,6 +653,14 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 			}
 		}
 
+		if options != nil {
+			options.TablesToCopy = vs.flags.GetTablesToCopy()
+		} else {
+			options = &binlogdatapb.VStreamOptions{
+				TablesToCopy: vs.flags.GetTablesToCopy(),
+			}
+		}
+
 		// Safe to access sgtid.Gtid here (because it can't change until streaming begins).
 		req := &binlogdatapb.VStreamRequest{
 			Target:       target,
@@ -667,6 +679,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 				return vterrors.Wrapf(ctx.Err(), "context ended while streaming from tablet %s in %s/%s",
 					tabletAliasString, sgtid.Keyspace, sgtid.Shard)
 			case streamErr := <-errCh:
+				log.Infof("vstream for %s/%s ended due to health check, should retry: %v", sgtid.Keyspace, sgtid.Shard, streamErr)
 				// You must return Code_UNAVAILABLE here to trigger a restart.
 				return vterrors.Errorf(vtrpcpb.Code_UNAVAILABLE, "error streaming from tablet %s in %s/%s: %s",
 					tabletAliasString, sgtid.Keyspace, sgtid.Shard, streamErr.Error())
@@ -674,6 +687,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 				// Unreachable.
 				// This can happen if a server misbehaves and does not end
 				// the stream after we return an error.
+				log.Infof("vstream for %s/%s ended due to journal event, returning io.EOF", sgtid.Keyspace, sgtid.Shard)
 				return io.EOF
 			default:
 			}
@@ -685,16 +699,10 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 			for i, event := range events {
 				switch event.Type {
 				case binlogdatapb.VEventType_FIELD:
-					// Update table names and send.
-					// If we're streaming from multiple keyspaces, this will disambiguate
-					// duplicate table names.
-					ev := event.CloneVT()
-					ev.FieldEvent.TableName = sgtid.Keyspace + "." + ev.FieldEvent.TableName
+					ev := maybeUpdateTableName(event, sgtid.Keyspace, vs.flags.GetExcludeKeyspaceFromTableName(), extractFieldTableName)
 					sendevents = append(sendevents, ev)
 				case binlogdatapb.VEventType_ROW:
-					// Update table names and send.
-					ev := event.CloneVT()
-					ev.RowEvent.TableName = sgtid.Keyspace + "." + ev.RowEvent.TableName
+					ev := maybeUpdateTableName(event, sgtid.Keyspace, vs.flags.GetExcludeKeyspaceFromTableName(), extractRowTableName)
 					sendevents = append(sendevents, ev)
 				case binlogdatapb.VEventType_COMMIT, binlogdatapb.VEventType_DDL, binlogdatapb.VEventType_OTHER:
 					sendevents = append(sendevents, event)
@@ -705,6 +713,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 					}
 
 					if err := vs.sendAll(ctx, sgtid, eventss); err != nil {
+						log.Infof("vstream for %s/%s, error in sendAll: %v", sgtid.Keyspace, sgtid.Shard, err)
 						return vterrors.Wrap(err, sendingEventsErr)
 					}
 					eventss = nil
@@ -721,6 +730,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 					}
 
 					if err := vs.sendAll(ctx, sgtid, eventss); err != nil {
+						log.Infof("vstream for %s/%s, error in sendAll, on copy completed event: %v", sgtid.Keyspace, sgtid.Shard, err)
 						return vterrors.Wrap(err, sendingEventsErr)
 					}
 					eventss = nil
@@ -751,6 +761,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 						}
 						eventss = append(eventss, sendevents)
 						if err := vs.sendAll(ctx, sgtid, eventss); err != nil {
+							log.Infof("vstream for %s/%s, error in sendAll, on journal event: %v", sgtid.Keyspace, sgtid.Shard, err)
 							return vterrors.Wrap(err, sendingEventsErr)
 						}
 						eventss = nil
@@ -785,6 +796,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 							if endTimer != nil {
 								<-endTimer.C
 							}
+							log.Infof("vstream for %s/%s ended due to journal event, returning io.EOF", sgtid.Keyspace, sgtid.Shard)
 							return io.EOF
 						}
 					}
@@ -813,7 +825,7 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 
 		retry, ignoreTablet := vs.shouldRetry(err)
 		if !retry {
-			log.Errorf("vstream for %s/%s error: %v", sgtid.Keyspace, sgtid.Shard, err)
+			log.Infof("vstream for %s/%s error, no retry: %v", sgtid.Keyspace, sgtid.Shard, err)
 			return vterrors.Wrapf(err, "error in vstream for %s/%s on tablet %s",
 				sgtid.Keyspace, sgtid.Shard, tabletAliasString)
 		}
@@ -831,6 +843,29 @@ func (vs *vstream) streamFromTablet(ctx context.Context, sgtid *binlogdatapb.Sha
 		log.Infof("vstream for %s/%s error, retrying: %v", sgtid.Keyspace, sgtid.Shard, err)
 	}
 
+}
+
+// maybeUpdateTableNames updates table names when the ExcludeKeyspaceFromTableName flag is disabled.
+// If we're streaming from multiple keyspaces, updating the table names by inserting the keyspace will disambiguate
+// duplicate table names. If we enable the ExcludeKeyspaceFromTableName flag to not update the table names, there is no need to
+// clone the entire event, whcih improves performance. This is typically safely used by clients only streaming one keyspace.
+func maybeUpdateTableName(event *binlogdatapb.VEvent, keyspace string, excludeKeyspaceFromTableName bool,
+	tableNameExtractor func(ev *binlogdatapb.VEvent) *string) *binlogdatapb.VEvent {
+	if excludeKeyspaceFromTableName {
+		return event
+	}
+	ev := event.CloneVT()
+	tableName := tableNameExtractor(ev)
+	*tableName = keyspace + "." + *tableName
+	return ev
+}
+
+func extractFieldTableName(ev *binlogdatapb.VEvent) *string {
+	return &ev.FieldEvent.TableName
+}
+
+func extractRowTableName(ev *binlogdatapb.VEvent) *string {
+	return &ev.RowEvent.TableName
 }
 
 // shouldRetry determines whether we should exit immediately or retry the vstream.
@@ -864,6 +899,20 @@ func (vs *vstream) shouldRetry(err error) (retry bool, ignoreTablet bool) {
 	// VStream.
 	if errCode == vtrpcpb.Code_INTERNAL {
 		return false, false
+	}
+	// Handle binary log purging errors by retrying with a different tablet.
+	// This occurs when a tablet doesn't have the requested GTID because the
+	// source purged the required binary logs. Another tablet might still have
+	// the logs, so we ignore this tablet and retry.
+	if errCode == vtrpcpb.Code_UNKNOWN {
+		sqlErr := sqlerror.NewSQLErrorFromError(err)
+		if sqlError, ok := sqlErr.(*sqlerror.SQLError); ok {
+			switch sqlError.Number() {
+			case sqlerror.ERMasterFatalReadingBinlog, // 1236
+				sqlerror.ERSourceHasPurgedRequiredGtids: // 1789
+				return true, true
+			}
+		}
 	}
 
 	// For anything else, if this is an ephemeral SQL error -- such as a

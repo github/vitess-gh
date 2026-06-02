@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"vitess.io/vitess/go/vt/mysqlctl"
+	"vitess.io/vitess/go/vt/utils"
 )
 
 var Teardown = &cobra.Command{
@@ -33,7 +34,7 @@ var Teardown = &cobra.Command{
 		"This is a destructive operation.\n" +
 		"{{</ warning >}}\n\n" +
 		"Shuts down a `mysqld` instance and removes its data directory.",
-	Example: `mysqlctl --tablet_uid 101 --alsologtostderr teardown`,
+	Example: `mysqlctl --tablet-uid 101 --alsologtostderr teardown`,
 	Args:    cobra.NoArgs,
 	RunE:    commandTeardown,
 }
@@ -62,7 +63,7 @@ func commandTeardown(cmd *cobra.Command, args []string) error {
 }
 
 func init() {
-	Teardown.Flags().DurationVar(&teardownArgs.WaitTime, "wait_time", teardownArgs.WaitTime, "How long to wait for mysqld shutdown.")
+	utils.SetFlagDurationVar(Teardown.Flags(), &teardownArgs.WaitTime, "wait-time", teardownArgs.WaitTime, "How long to wait for mysqld shutdown.")
 	Teardown.Flags().BoolVarP(&teardownArgs.Force, "force", "f", teardownArgs.Force, "Remove the root directory even if mysqld shutdown fails.")
 
 	Root.AddCommand(Teardown)

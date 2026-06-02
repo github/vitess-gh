@@ -19,6 +19,8 @@ package vtgate
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"testing"
@@ -134,6 +136,86 @@ func TestVStreamSkew(t *testing.T) {
 	}
 }
 
+func TestVStreamEventsExcludeKeyspaceFromTableName(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cell := "aa"
+	ks := "TestVStream"
+	_ = createSandbox(ks)
+	hc := discovery.NewFakeHealthCheck(nil)
+	st := getSandboxTopo(ctx, cell, ks, []string{"-20"})
+
+	vsm := newTestVStreamManager(ctx, hc, st, cell)
+	sbc0 := hc.AddTestTablet(cell, "1.1.1.1", 1001, ks, "-20", topodatapb.TabletType_PRIMARY, true, 1, nil)
+	addTabletToSandboxTopo(t, ctx, st, ks, "-20", sbc0.Tablet())
+
+	send1 := []*binlogdatapb.VEvent{
+		{Type: binlogdatapb.VEventType_GTID, Gtid: "gtid01"},
+		{Type: binlogdatapb.VEventType_FIELD, FieldEvent: &binlogdatapb.FieldEvent{TableName: "f0"}},
+		{Type: binlogdatapb.VEventType_ROW, RowEvent: &binlogdatapb.RowEvent{TableName: "t0"}},
+		{Type: binlogdatapb.VEventType_COMMIT},
+	}
+	want1 := &binlogdatapb.VStreamResponse{Events: []*binlogdatapb.VEvent{
+		{Type: binlogdatapb.VEventType_VGTID, Vgtid: &binlogdatapb.VGtid{
+			ShardGtids: []*binlogdatapb.ShardGtid{{
+				Keyspace: ks,
+				Shard:    "-20",
+				Gtid:     "gtid01",
+			}},
+		}},
+		// Verify that the table names lack the keyspace
+		{Type: binlogdatapb.VEventType_FIELD, FieldEvent: &binlogdatapb.FieldEvent{TableName: "f0"}},
+		{Type: binlogdatapb.VEventType_ROW, RowEvent: &binlogdatapb.RowEvent{TableName: "t0"}},
+		{Type: binlogdatapb.VEventType_COMMIT},
+	}}
+	sbc0.AddVStreamEvents(send1, nil)
+
+	send2 := []*binlogdatapb.VEvent{
+		{Type: binlogdatapb.VEventType_GTID, Gtid: "gtid02"},
+		{Type: binlogdatapb.VEventType_DDL},
+	}
+	want2 := &binlogdatapb.VStreamResponse{Events: []*binlogdatapb.VEvent{
+		{Type: binlogdatapb.VEventType_VGTID, Vgtid: &binlogdatapb.VGtid{
+			ShardGtids: []*binlogdatapb.ShardGtid{{
+				Keyspace: ks,
+				Shard:    "-20",
+				Gtid:     "gtid02",
+			}},
+		}},
+		{Type: binlogdatapb.VEventType_DDL},
+	}}
+	sbc0.AddVStreamEvents(send2, nil)
+
+	vgtid := &binlogdatapb.VGtid{
+		ShardGtids: []*binlogdatapb.ShardGtid{{
+			Keyspace: ks,
+			Shard:    "-20",
+			Gtid:     "pos",
+		}},
+	}
+
+	vstreamCtx, vstreamCancel := context.WithCancel(ctx)
+	defer vstreamCancel()
+
+	receivedResponses := make([]*binlogdatapb.VStreamResponse, 0)
+	err := vsm.VStream(vstreamCtx, topodatapb.TabletType_PRIMARY, vgtid, nil, &vtgatepb.VStreamFlags{ExcludeKeyspaceFromTableName: true}, func(events []*binlogdatapb.VEvent) error {
+		receivedResponses = append(receivedResponses, &binlogdatapb.VStreamResponse{Events: events})
+
+		if len(receivedResponses) == 2 {
+			// Stop streaming after receiving both expected responses.
+			vstreamCancel()
+		}
+
+		return nil
+	})
+
+	require.Error(t, err)
+	require.ErrorIs(t, vterrors.UnwrapAll(err), context.Canceled)
+
+	require.ElementsMatch(t, []*binlogdatapb.VStreamResponse{want1, want2}, receivedResponses)
+}
+
 func TestVStreamEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -210,6 +292,99 @@ func TestVStreamEvents(t *testing.T) {
 	require.ErrorIs(t, vterrors.UnwrapAll(err), context.Canceled)
 
 	require.ElementsMatch(t, []*binlogdatapb.VStreamResponse{want1, want2}, receivedEvents)
+}
+
+func BenchmarkVStreamEvents(b *testing.B) {
+	tests := []struct {
+		name                         string
+		excludeKeyspaceFromTableName bool
+	}{
+		{"ExcludeKeyspaceFromTableName=true", true},
+		{"ExcludeKeyspaceFromTableName=false", false},
+	}
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			var f *os.File
+			var err error
+			if os.Getenv("PROFILE_CPU") == "true" {
+				f, err = os.Create("cpu.prof")
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer f.Close()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			cell := "aa"
+			ks := "TestVStream"
+			_ = createSandbox(ks)
+			hc := discovery.NewFakeHealthCheck(nil)
+			st := getSandboxTopo(ctx, cell, ks, []string{"-20"})
+
+			vsm := newTestVStreamManager(ctx, hc, st, cell)
+			sbc0 := hc.AddTestTablet(cell, "1.1.1.1", 1001, ks, "-20", topodatapb.TabletType_PRIMARY, true, 1, nil)
+			addTabletToSandboxTopo(b, ctx, st, ks, "-20", sbc0.Tablet())
+
+			const totalEvents = 100_000
+			batchSize := 10_000
+			for i := 0; i < totalEvents; i += batchSize {
+				var events []*binlogdatapb.VEvent
+				events = append(events, &binlogdatapb.VEvent{
+					Type: binlogdatapb.VEventType_GTID,
+					Gtid: fmt.Sprintf("gtid-%d", i),
+				})
+				for j := 0; j < batchSize-2; j++ {
+					events = append(events, &binlogdatapb.VEvent{
+						Type: binlogdatapb.VEventType_ROW,
+						RowEvent: &binlogdatapb.RowEvent{
+							TableName: fmt.Sprintf("t%d", j),
+						},
+					})
+				}
+				events = append(events, &binlogdatapb.VEvent{Type: binlogdatapb.VEventType_COMMIT})
+				sbc0.AddVStreamEvents(events, nil)
+			}
+
+			vgtid := &binlogdatapb.VGtid{
+				ShardGtids: []*binlogdatapb.ShardGtid{{
+					Keyspace: ks,
+					Shard:    "-20",
+					Gtid:     "pos",
+				}},
+			}
+
+			// Start the timer and CPU profile after all setup is done
+			b.ResetTimer()
+			if os.Getenv("PROFILE_CPU") == "true" {
+				pprof.StartCPUProfile(f)
+			}
+
+			vstreamCtx, vstreamCancel := context.WithCancel(ctx)
+			defer vstreamCancel()
+
+			received := 0
+			err = vsm.VStream(vstreamCtx, topodatapb.TabletType_PRIMARY, vgtid, nil, &vtgatepb.VStreamFlags{ExcludeKeyspaceFromTableName: tt.excludeKeyspaceFromTableName}, func(events []*binlogdatapb.VEvent) error {
+				received += len(events)
+
+				if received >= totalEvents {
+					vstreamCancel()
+				}
+
+				return nil
+			})
+
+			b.Logf("Received events %d, expected total %d", received, totalEvents)
+			b.StopTimer()
+			if os.Getenv("PROFILE_CPU") == "true" {
+				pprof.StopCPUProfile()
+			}
+
+			require.Error(b, err)
+			require.ErrorIs(b, vterrors.UnwrapAll(err), context.Canceled)
+
+			require.GreaterOrEqual(b, received, totalEvents)
+		})
+	}
 }
 
 // TestVStreamChunks ensures that a transaction that's broken
@@ -479,7 +654,9 @@ func TestVStreamsMetrics(t *testing.T) {
 func TestVStreamsMetricsErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cell := "aa"
+
+	// Use a unique cell to avoid parallel tests interfering with each other's metrics
+	cell := "ac"
 	ks := "TestVStream"
 	_ = createSandbox(ks)
 	hc := discovery.NewFakeHealthCheck(nil)
@@ -498,11 +675,11 @@ func TestVStreamsMetricsErrors(t *testing.T) {
 	const wantErr = "Invalid arg message"
 	sbc0.AddVStreamEvents(nil, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, wantErr))
 
-	send1 := []*binlogdatapb.VEvent{
+	expectedEvents := []*binlogdatapb.VEvent{
 		{Type: binlogdatapb.VEventType_GTID, Gtid: "gtid02"},
 		{Type: binlogdatapb.VEventType_COMMIT, Timestamp: 10, CurrentTime: 17 * 1e9},
 	}
-	sbc1.AddVStreamEvents(send1, nil)
+	sbc1.AddVStreamEvents(expectedEvents, nil)
 
 	vgtid := &binlogdatapb.VGtid{
 		ShardGtids: []*binlogdatapb.ShardGtid{{
@@ -531,17 +708,29 @@ func TestVStreamsMetricsErrors(t *testing.T) {
 		return nil
 	})
 
-	if err == nil || !strings.Contains(err.Error(), wantErr) {
-		require.ErrorContains(t, err, wantErr)
+	require.Error(t, err)
+	require.ErrorContains(t, err, wantErr)
+
+	// Because there's essentially a race condition between the two streams,
+	// we may get 0 or 1 results, depending on whether the error from
+	// sbc0 or the events from sbc1 come first.
+	require.LessOrEqual(t, len(results), 1)
+	if len(results) == 1 {
+		require.Len(t, results[0].Events, 2)
 	}
 
-	expectedLabels1 := "TestVStream.-20.PRIMARY"
-	expectedLabels2 := "TestVStream.20-40.PRIMARY"
+	// When we verify the metrics, we should see that the -20 stream had an error,
+	// while the 20-40 stream might have one too (if the error from -20 came first),
+	// or might not (if the events from 20-40 came first).
+	// So we only verify the -20 metrics exactly, while the 20-40 metrics are
+	// verified to be at least 0 or 1 as appropriate.
 
-	wantVStreamsEndedWithErrors := make(map[string]int64)
-	wantVStreamsEndedWithErrors[expectedLabels1] = 1
-	wantVStreamsEndedWithErrors[expectedLabels2] = 0
-	assert.Equal(t, wantVStreamsEndedWithErrors, vsm.vstreamsEndedWithErrors.Counts(), "vstreamsEndedWithErrors matches")
+	errorCounts := vsm.vstreamsEndedWithErrors.Counts()
+	require.Contains(t, errorCounts, "TestVStream.-20.PRIMARY")
+	require.Contains(t, errorCounts, "TestVStream.20-40.PRIMARY")
+
+	require.Equal(t, int64(1), errorCounts["TestVStream.-20.PRIMARY"])
+	require.LessOrEqual(t, errorCounts["TestVStream.20-40.PRIMARY"], int64(1))
 }
 
 func TestVStreamErrorInCallback(t *testing.T) {
@@ -643,6 +832,20 @@ func TestVStreamRetriableErrors(t *testing.T) {
 			msg:          "vttablet: rpc error: code = Unknown desc = Query execution was interrupted, maximum statement execution time exceeded (errno 3024) (sqlstate HY000)",
 			shouldRetry:  true,
 			ignoreTablet: false,
+		},
+		{
+			name:         "binary log purged",
+			code:         vtrpcpb.Code_UNKNOWN,
+			msg:          "vttablet: rpc error: code = Unknown desc = stream (at source tablet) error @ (including the GTID we failed to process) 013c5ddc-dd89-11ed-b3a1-125a006436b9:1-305627274,fe50e15a-0213-11ee-bfbe-0a048e8090b5:1-340389717: Cannot replicate because the source purged required binary logs. Replicate the missing transactions from elsewhere, or provision a new replica from backup. Consider increasing the source's binary log expiration period. The GTID sets and the missing purged transactions are too long to print in this message. For more information, please see the source's error log or the manual for GTID_SUBTRACT (errno 1236) (sqlstate HY000)",
+			shouldRetry:  true,
+			ignoreTablet: true,
+		},
+		{
+			name:         "source purged required gtids",
+			code:         vtrpcpb.Code_UNKNOWN,
+			msg:          "vttablet: rpc error: code = Unknown desc = Cannot replicate because the source purged required binary logs. Replicate the missing transactions from elsewhere, or provision a new replica from backup. Consider increasing the source's binary log expiration period. Missing transactions are: 013c5ddc-dd89-11ed-b3a1-125a006436b9:305627275-305627280 (errno 1789) (sqlstate HY000)",
+			shouldRetry:  true,
+			ignoreTablet: true,
 		},
 	}
 
@@ -2008,12 +2211,12 @@ func getSandboxTopoMultiCell(ctx context.Context, cells []string, keyspace strin
 	return st
 }
 
-func addTabletToSandboxTopo(t *testing.T, ctx context.Context, st *sandboxTopo, ks, shard string, tablet *topodatapb.Tablet) {
+func addTabletToSandboxTopo(tb testing.TB, ctx context.Context, st *sandboxTopo, ks, shard string, tablet *topodatapb.Tablet) {
 	_, err := st.topoServer.UpdateShardFields(ctx, ks, shard, func(si *topo.ShardInfo) error {
 		si.PrimaryAlias = tablet.Alias
 		return nil
 	})
-	require.NoError(t, err)
+	require.NoError(tb, err)
 	err = st.topoServer.CreateTablet(ctx, tablet)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 }

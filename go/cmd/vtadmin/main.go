@@ -28,6 +28,7 @@ import (
 	"vitess.io/vitess/go/vt/log"
 	"vitess.io/vitess/go/vt/logutil"
 	"vitess.io/vitess/go/vt/servenv"
+	"vitess.io/vitess/go/vt/utils"
 	"vitess.io/vitess/go/vt/vtadmin"
 	"vitess.io/vitess/go/vt/vtadmin/cache"
 	"vitess.io/vitess/go/vt/vtadmin/cluster"
@@ -35,6 +36,7 @@ import (
 	vtadminhttp "vitess.io/vitess/go/vt/vtadmin/http"
 	"vitess.io/vitess/go/vt/vtadmin/http/debug"
 	"vitess.io/vitess/go/vt/vtadmin/rbac"
+	"vitess.io/vitess/go/vt/vtctl/grpcclientcommon"
 	"vitess.io/vitess/go/vt/vtenv"
 )
 
@@ -159,7 +161,7 @@ func run(cmd *cobra.Command, args []string) {
 	}
 }
 
-func main() {
+func registerFlags() {
 	// Common flags
 	rootCmd.Flags().StringVar(&opts.Addr, "addr", ":15000", "address to serve on")
 	rootCmd.Flags().DurationVar(&opts.CMuxReadTimeout, "lmux-read-timeout", time.Second, "how long to spend connection muxing")
@@ -173,7 +175,7 @@ func main() {
 
 	// Tracing flags
 	trace.RegisterFlags(rootCmd.Flags()) // defined in go/vt/trace
-	rootCmd.Flags().BoolVar(&opts.EnableTracing, "grpc-tracing", false, "whether to enable tracing on the gRPC server")
+	utils.SetFlagBoolVar(rootCmd.Flags(), &opts.EnableTracing, "grpc-tracing", false, "whether to enable tracing on the gRPC server")
 	rootCmd.Flags().BoolVar(&httpOpts.EnableTracing, "http-tracing", false, "whether to enable tracing on the HTTP server")
 
 	// gRPC server flags
@@ -217,6 +219,15 @@ func main() {
 
 	servenv.RegisterMySQLServerFlags(rootCmd.Flags())
 
+	// Register TLS flags for gRPC connections to vtctld
+	grpcclientcommon.RegisterFlags(rootCmd.Flags())
+
+}
+
+func main() {
+	registerFlags()
+
+	rootCmd.SetGlobalNormalizationFunc(utils.NormalizeUnderscoresToDashes)
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}

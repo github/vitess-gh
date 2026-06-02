@@ -31,7 +31,8 @@ type StatementType int
 // These constants are used to identify the SQL statement type.
 // Changing this list will require reviewing all calls to Preview.
 const (
-	StmtSelect StatementType = iota
+	StmtUnknown StatementType = iota
+	StmtSelect
 	StmtStream
 	StmtInsert
 	StmtReplace
@@ -46,7 +47,6 @@ const (
 	StmtUse
 	StmtOther
 	StmtAnalyze
-	StmtUnknown
 	StmtComment
 	StmtPriv
 	StmtExplain
@@ -436,9 +436,10 @@ func IsSimpleTuple(node Expr) bool {
 	return false
 }
 
-func SupportsOptimizerHint(stmt StatementType) bool {
+// IsReadStatement returns true if the statement is a read statement.
+func (stmt StatementType) IsReadStatement() bool {
 	switch stmt {
-	case StmtSelect, StmtInsert, StmtUpdate, StmtDelete, StmtStream, StmtVStream:
+	case StmtSelect, StmtShow:
 		return true
 	default:
 		return false

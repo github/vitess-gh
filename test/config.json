@@ -359,6 +359,18 @@
       "Tags": [],
       "Needs": []
     },
+    "unmanaged_ssl_check": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/encryption/unmanagedsslcheck"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "12",
+      "Tags": [],
+      "Needs": []
+    },
     "keyspace": {
       "File": "unused.go",
       "Packages": [
@@ -658,18 +670,47 @@
       "Tags": [],
       "Needs": []
     },
+    "vtctldclient": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtctldclient"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "15",
+      "Tags": [],
+      "Needs": []
+    },
     "tabletmanager": {
       "File": "unused.go",
       "Packages": [
         "vitess.io/vitess/go/test/endtoend/tabletmanager"
       ],
-      "Args": [],
+      "Args": [
+        "-timeout",
+        "20m"
+      ],
       "Command": [],
       "Manual": false,
       "Shard": "18",
       "Tags": [
         "site_test"
       ],
+      "Needs": [
+        "consul"
+      ]
+    },
+    "tabletmanager_primary": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/tabletmanager/primary"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "18",
+      "Tags": [],
       "Needs": [
         "consul"
       ]
@@ -774,6 +815,20 @@
       "File": "unused.go",
       "Packages": [
         "vitess.io/vitess/go/test/endtoend/vtgate"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_general_heavy",
+      "Tags": [],
+      "Needs": [
+        "limit-resources"
+      ]
+    },
+    "vtgate_tablet_healthcheck": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/tablet_healthcheck"
       ],
       "Args": [],
       "Command": [],
@@ -1048,6 +1103,42 @@
       ],
       "Needs": []
     },
+    "vtgate_queries_lookup_queries": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/queries/lookup_queries"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_queries",
+      "Tags": [],
+      "Needs": []
+    },
+    "vtgate_queries_orderby_without_schematracker": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/queries/orderby/without_schematracker"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_queries",
+      "Tags": [],
+      "Needs": []
+    },
+    "mysql_vs_vitess": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/utils/mysqlvsvitess"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_queries",
+      "Tags": [],
+      "Needs": []
+    },
     "vtgate_kill": {
       "File": "unused.go",
       "Packages": [
@@ -1181,6 +1272,42 @@
       "Tags": [
         "upgrade_downgrade_query_serving_schema"
       ],
+      "Needs": []
+    },
+    "vtgate_schematracker_multi_ks": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/schematracker/multi_ks"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_schema_tracker",
+      "Tags": [],
+      "Needs": []
+    },
+    "vtgate_schematracker_multi_ks_routing": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/schematracker/multi_ks_routing"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_schema_tracker",
+      "Tags": [],
+      "Needs": []
+    },
+    "vtgate_mysql84": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/mysql84"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "mysql84",
+      "Tags": [],
       "Needs": []
     },
     "vtgate_sequence": {
@@ -1378,6 +1505,19 @@
       "Needs": [
         "larger-runner"
       ],
+      "BuildTag": "debug2PC"
+    },
+    "vtgate_transaction_timeout": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtgate/queries/transaction_timeout"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "vtgate_transaction",
+      "Tags": [],
+      "Needs": [],
       "BuildTag": "debug2PC"
     },
     "vtgate_transaction_partial_exec": {
@@ -1665,6 +1805,18 @@
       "File": "unused.go",
       "Packages": [
         "vitess.io/vitess/go/test/endtoend/vtcombo"
+      ],
+      "Args": [],
+      "Command": [],
+      "Manual": false,
+      "Shard": "docker_cluster",
+      "Tags": [],
+      "Needs": []
+    },
+    "vtcombo_recreate": {
+      "File": "unused.go",
+      "Packages": [
+        "vitess.io/vitess/go/test/endtoend/vtcombo/recreate"
       ],
       "Args": [],
       "Command": [],
@@ -2423,19 +2575,6 @@
       "Tags": [
         ""
       ],
-      "Needs": []
-    },
-    "vtgate_mysql80": {
-      "File": "unused.go",
-      "Packages": [
-        "vitess.io/vitess/go/test/endtoend/vtgate/schematracker/multi_ks"
-      ],
-      "Args": [],
-      "Command": [],
-      "Manual": false,
-      "Shard": "mysql80",
-      "RetryMax": 1,
-      "Tags": [],
       "Needs": []
     }
   }

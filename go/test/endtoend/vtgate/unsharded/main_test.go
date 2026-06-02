@@ -34,6 +34,7 @@ import (
 	"vitess.io/vitess/go/mysql"
 	"vitess.io/vitess/go/sqltypes"
 	"vitess.io/vitess/go/test/endtoend/cluster"
+	vtutils "vitess.io/vitess/go/vt/utils"
 )
 
 var (
@@ -182,7 +183,7 @@ func TestMain(m *testing.M) {
 		}
 
 		// Start vtgate
-		clusterInstance.VtGateExtraArgs = []string{"--warn_sharded_only=true"}
+		clusterInstance.VtGateExtraArgs = []string{vtutils.GetFlagVariantForTests("--warn-sharded-only") + "=true"}
 		if err := clusterInstance.StartVtgate(); err != nil {
 			log.Fatal(err.Error())
 			return 1
@@ -457,4 +458,71 @@ func execMulti(t *testing.T, conn *mysql.Conn, query string) []*sqltypes.Result 
 		res = append(res, qr)
 	}
 	return res
+}
+
+// TestMetricForExplain verifies that query metrics are correctly published for explain queries.
+func TestMetricForExplain(t *testing.T) {
+	ctx := context.Background()
+	conn, err := mysql.Connect(ctx, &vtParams)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	initialQP := getQPMetric(t, "QueryExecutions")
+	initialQT := getQPMetric(t, "QueryExecutionsByTable")
+
+	t.Run("explain t1", func(t *testing.T) {
+		utils.Exec(t, conn, "explain t1")
+		updatedQP := getQPMetric(t, "QueryExecutions")
+		updatedQT := getQPMetric(t, "QueryExecutionsByTable")
+		assert.EqualValues(t, 1, getValue(updatedQP, "EXPLAIN.Passthrough.PRIMARY")-getValue(initialQP, "EXPLAIN.Passthrough.PRIMARY"))
+		assert.EqualValues(t, 1, getValue(updatedQT, "EXPLAIN.customer_t1")-getValue(initialQT, "EXPLAIN.customer_t1"))
+	})
+
+	t.Run("explain `select c1, c2 from t1`", func(t *testing.T) {
+		utils.ExecAllowError(t, conn, "explain `select c1, c2 from t1`")
+		updatedQP := getQPMetric(t, "QueryExecutions")
+		updatedQT := getQPMetric(t, "QueryExecutionsByTable")
+		assert.EqualValues(t, 2, getValue(updatedQP, "EXPLAIN.Passthrough.PRIMARY")-getValue(initialQP, "EXPLAIN.Passthrough.PRIMARY"))
+		assert.EqualValues(t, 1, getValue(updatedQT, "EXPLAIN.customer_t1")-getValue(initialQT, "EXPLAIN.customer_t1"))
+	})
+
+	t.Run("explain select c1, c2 from t1", func(t *testing.T) {
+		utils.Exec(t, conn, "explain select c1, c2 from t1")
+		updatedQP := getQPMetric(t, "QueryExecutions")
+		updatedQT := getQPMetric(t, "QueryExecutionsByTable")
+		assert.EqualValues(t, 3, getValue(updatedQP, "EXPLAIN.Passthrough.PRIMARY")-getValue(initialQP, "EXPLAIN.Passthrough.PRIMARY"))
+		assert.EqualValues(t, 2, getValue(updatedQT, "EXPLAIN.customer_t1")-getValue(initialQT, "EXPLAIN.customer_t1"))
+	})
+}
+
+func getQPMetric(t *testing.T, metric string) map[string]any {
+	t.Helper()
+
+	vars := clusterInstance.VtgateProcess.GetVars()
+	require.NotNil(t, vars)
+
+	qpVars, exists := vars[metric]
+	if !exists {
+		return nil
+	}
+
+	qpMap, ok := qpVars.(map[string]any)
+	require.True(t, ok, "query queryMetric vars is not a map")
+
+	return qpMap
+}
+
+func getValue(m map[string]any, key string) float64 {
+	if m == nil {
+		return 0
+	}
+	val, exists := m[key]
+	if !exists {
+		return 0
+	}
+	f, ok := val.(float64)
+	if !ok {
+		return 0
+	}
+	return f
 }

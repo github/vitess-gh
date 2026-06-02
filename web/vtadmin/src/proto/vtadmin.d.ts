@@ -18568,6 +18568,9 @@ export namespace topodata {
 
         /** Shard is_primary_serving */
         is_primary_serving?: (boolean|null);
+
+        /** Shard vtorc_state */
+        vtorc_state?: (vtorcdata.IShard|null);
     }
 
     /** Represents a Shard. */
@@ -18596,6 +18599,9 @@ export namespace topodata {
 
         /** Shard is_primary_serving. */
         public is_primary_serving: boolean;
+
+        /** Shard vtorc_state. */
+        public vtorc_state?: (vtorcdata.IShard|null);
 
         /**
          * Creates a new Shard instance using the specified properties.
@@ -18934,6 +18940,9 @@ export namespace topodata {
 
         /** Keyspace sidecar_db_name */
         sidecar_db_name?: (string|null);
+
+        /** Keyspace vtorc_state */
+        vtorc_state?: (vtorcdata.IKeyspace|null);
     }
 
     /** Represents a Keyspace. */
@@ -18962,6 +18971,9 @@ export namespace topodata {
 
         /** Keyspace sidecar_db_name. */
         public sidecar_db_name: string;
+
+        /** Keyspace vtorc_state. */
+        public vtorc_state?: (vtorcdata.IKeyspace|null);
 
         /**
          * Creates a new Keyspace instance using the specified properties.
@@ -20623,6 +20635,204 @@ export namespace topodata {
 
         /**
          * Gets the default type url for ExternalClusters
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+}
+
+/** Namespace vtorcdata. */
+export namespace vtorcdata {
+
+    /** Properties of a Keyspace. */
+    interface IKeyspace {
+
+        /** Keyspace disable_emergency_reparent */
+        disable_emergency_reparent?: (boolean|null);
+    }
+
+    /** Represents a Keyspace. */
+    class Keyspace implements IKeyspace {
+
+        /**
+         * Constructs a new Keyspace.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtorcdata.IKeyspace);
+
+        /** Keyspace disable_emergency_reparent. */
+        public disable_emergency_reparent: boolean;
+
+        /**
+         * Creates a new Keyspace instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns Keyspace instance
+         */
+        public static create(properties?: vtorcdata.IKeyspace): vtorcdata.Keyspace;
+
+        /**
+         * Encodes the specified Keyspace message. Does not implicitly {@link vtorcdata.Keyspace.verify|verify} messages.
+         * @param message Keyspace message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtorcdata.IKeyspace, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified Keyspace message, length delimited. Does not implicitly {@link vtorcdata.Keyspace.verify|verify} messages.
+         * @param message Keyspace message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtorcdata.IKeyspace, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a Keyspace message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns Keyspace
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtorcdata.Keyspace;
+
+        /**
+         * Decodes a Keyspace message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns Keyspace
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtorcdata.Keyspace;
+
+        /**
+         * Verifies a Keyspace message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a Keyspace message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns Keyspace
+         */
+        public static fromObject(object: { [k: string]: any }): vtorcdata.Keyspace;
+
+        /**
+         * Creates a plain object from a Keyspace message. Also converts values to other types if specified.
+         * @param message Keyspace
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtorcdata.Keyspace, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this Keyspace to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for Keyspace
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a Shard. */
+    interface IShard {
+
+        /** Shard disable_emergency_reparent */
+        disable_emergency_reparent?: (boolean|null);
+    }
+
+    /** Represents a Shard. */
+    class Shard implements IShard {
+
+        /**
+         * Constructs a new Shard.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtorcdata.IShard);
+
+        /** Shard disable_emergency_reparent. */
+        public disable_emergency_reparent: boolean;
+
+        /**
+         * Creates a new Shard instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns Shard instance
+         */
+        public static create(properties?: vtorcdata.IShard): vtorcdata.Shard;
+
+        /**
+         * Encodes the specified Shard message. Does not implicitly {@link vtorcdata.Shard.verify|verify} messages.
+         * @param message Shard message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtorcdata.IShard, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified Shard message, length delimited. Does not implicitly {@link vtorcdata.Shard.verify|verify} messages.
+         * @param message Shard message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtorcdata.IShard, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a Shard message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns Shard
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtorcdata.Shard;
+
+        /**
+         * Decodes a Shard message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns Shard
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtorcdata.Shard;
+
+        /**
+         * Verifies a Shard message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a Shard message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns Shard
+         */
+        public static fromObject(object: { [k: string]: any }): vtorcdata.Shard;
+
+        /**
+         * Creates a plain object from a Shard message. Also converts values to other types if specified.
+         * @param message Shard
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtorcdata.Shard, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this Shard to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for Shard
          * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
          * @returns The default type url
          */
@@ -28043,6 +28253,194 @@ export namespace tabletmanagerdata {
         public static getTypeUrl(typeUrlPrefix?: string): string;
     }
 
+    /** Properties of a RestartReplicationRequest. */
+    interface IRestartReplicationRequest {
+
+        /** RestartReplicationRequest semiSync */
+        semiSync?: (boolean|null);
+    }
+
+    /** Represents a RestartReplicationRequest. */
+    class RestartReplicationRequest implements IRestartReplicationRequest {
+
+        /**
+         * Constructs a new RestartReplicationRequest.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IRestartReplicationRequest);
+
+        /** RestartReplicationRequest semiSync. */
+        public semiSync: boolean;
+
+        /**
+         * Creates a new RestartReplicationRequest instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns RestartReplicationRequest instance
+         */
+        public static create(properties?: tabletmanagerdata.IRestartReplicationRequest): tabletmanagerdata.RestartReplicationRequest;
+
+        /**
+         * Encodes the specified RestartReplicationRequest message. Does not implicitly {@link tabletmanagerdata.RestartReplicationRequest.verify|verify} messages.
+         * @param message RestartReplicationRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IRestartReplicationRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified RestartReplicationRequest message, length delimited. Does not implicitly {@link tabletmanagerdata.RestartReplicationRequest.verify|verify} messages.
+         * @param message RestartReplicationRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IRestartReplicationRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a RestartReplicationRequest message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns RestartReplicationRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.RestartReplicationRequest;
+
+        /**
+         * Decodes a RestartReplicationRequest message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns RestartReplicationRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.RestartReplicationRequest;
+
+        /**
+         * Verifies a RestartReplicationRequest message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a RestartReplicationRequest message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns RestartReplicationRequest
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.RestartReplicationRequest;
+
+        /**
+         * Creates a plain object from a RestartReplicationRequest message. Also converts values to other types if specified.
+         * @param message RestartReplicationRequest
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.RestartReplicationRequest, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this RestartReplicationRequest to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for RestartReplicationRequest
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a RestartReplicationResponse. */
+    interface IRestartReplicationResponse {
+    }
+
+    /** Represents a RestartReplicationResponse. */
+    class RestartReplicationResponse implements IRestartReplicationResponse {
+
+        /**
+         * Constructs a new RestartReplicationResponse.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IRestartReplicationResponse);
+
+        /**
+         * Creates a new RestartReplicationResponse instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns RestartReplicationResponse instance
+         */
+        public static create(properties?: tabletmanagerdata.IRestartReplicationResponse): tabletmanagerdata.RestartReplicationResponse;
+
+        /**
+         * Encodes the specified RestartReplicationResponse message. Does not implicitly {@link tabletmanagerdata.RestartReplicationResponse.verify|verify} messages.
+         * @param message RestartReplicationResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IRestartReplicationResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified RestartReplicationResponse message, length delimited. Does not implicitly {@link tabletmanagerdata.RestartReplicationResponse.verify|verify} messages.
+         * @param message RestartReplicationResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IRestartReplicationResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a RestartReplicationResponse message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns RestartReplicationResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.RestartReplicationResponse;
+
+        /**
+         * Decodes a RestartReplicationResponse message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns RestartReplicationResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.RestartReplicationResponse;
+
+        /**
+         * Verifies a RestartReplicationResponse message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a RestartReplicationResponse message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns RestartReplicationResponse
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.RestartReplicationResponse;
+
+        /**
+         * Creates a plain object from a RestartReplicationResponse message. Also converts values to other types if specified.
+         * @param message RestartReplicationResponse
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.RestartReplicationResponse, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this RestartReplicationResponse to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for RestartReplicationResponse
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
     /** Properties of a StartReplicationUntilAfterRequest. */
     interface IStartReplicationUntilAfterRequest {
 
@@ -33550,6 +33948,9 @@ export namespace tabletmanagerdata {
 
         /** ValidateVReplicationPermissionsResponse ok */
         ok?: (boolean|null);
+
+        /** ValidateVReplicationPermissionsResponse error */
+        error?: (string|null);
     }
 
     /** Represents a ValidateVReplicationPermissionsResponse. */
@@ -33566,6 +33967,9 @@ export namespace tabletmanagerdata {
 
         /** ValidateVReplicationPermissionsResponse ok. */
         public ok: boolean;
+
+        /** ValidateVReplicationPermissionsResponse error. */
+        public error: string;
 
         /**
          * Creates a new ValidateVReplicationPermissionsResponse instance using the specified properties.
@@ -34503,6 +34907,9 @@ export namespace tabletmanagerdata {
 
         /** UpdateVReplicationWorkflowRequest message */
         message?: (string|null);
+
+        /** UpdateVReplicationWorkflowRequest filter_rules */
+        filter_rules?: (binlogdata.IRule[]|null);
     }
 
     /** Represents an UpdateVReplicationWorkflowRequest. */
@@ -34540,6 +34947,9 @@ export namespace tabletmanagerdata {
 
         /** UpdateVReplicationWorkflowRequest message. */
         public message?: (string|null);
+
+        /** UpdateVReplicationWorkflowRequest filter_rules. */
+        public filter_rules: binlogdata.IRule[];
 
         /**
          * Creates a new UpdateVReplicationWorkflowRequest instance using the specified properties.
@@ -36335,6 +36745,618 @@ export namespace tabletmanagerdata {
          */
         public static getTypeUrl(typeUrlPrefix?: string): string;
     }
+
+    /** Properties of an UpdateSequenceTablesRequest. */
+    interface IUpdateSequenceTablesRequest {
+
+        /** UpdateSequenceTablesRequest sequences */
+        sequences?: (tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata[]|null);
+    }
+
+    /** Represents an UpdateSequenceTablesRequest. */
+    class UpdateSequenceTablesRequest implements IUpdateSequenceTablesRequest {
+
+        /**
+         * Constructs a new UpdateSequenceTablesRequest.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IUpdateSequenceTablesRequest);
+
+        /** UpdateSequenceTablesRequest sequences. */
+        public sequences: tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata[];
+
+        /**
+         * Creates a new UpdateSequenceTablesRequest instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns UpdateSequenceTablesRequest instance
+         */
+        public static create(properties?: tabletmanagerdata.IUpdateSequenceTablesRequest): tabletmanagerdata.UpdateSequenceTablesRequest;
+
+        /**
+         * Encodes the specified UpdateSequenceTablesRequest message. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesRequest.verify|verify} messages.
+         * @param message UpdateSequenceTablesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IUpdateSequenceTablesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified UpdateSequenceTablesRequest message, length delimited. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesRequest.verify|verify} messages.
+         * @param message UpdateSequenceTablesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IUpdateSequenceTablesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes an UpdateSequenceTablesRequest message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns UpdateSequenceTablesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.UpdateSequenceTablesRequest;
+
+        /**
+         * Decodes an UpdateSequenceTablesRequest message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns UpdateSequenceTablesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.UpdateSequenceTablesRequest;
+
+        /**
+         * Verifies an UpdateSequenceTablesRequest message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates an UpdateSequenceTablesRequest message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns UpdateSequenceTablesRequest
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.UpdateSequenceTablesRequest;
+
+        /**
+         * Creates a plain object from an UpdateSequenceTablesRequest message. Also converts values to other types if specified.
+         * @param message UpdateSequenceTablesRequest
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.UpdateSequenceTablesRequest, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this UpdateSequenceTablesRequest to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for UpdateSequenceTablesRequest
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    namespace UpdateSequenceTablesRequest {
+
+        /** Properties of a SequenceMetadata. */
+        interface ISequenceMetadata {
+
+            /** SequenceMetadata backing_table_name */
+            backing_table_name?: (string|null);
+
+            /** SequenceMetadata backing_table_db_name */
+            backing_table_db_name?: (string|null);
+
+            /** SequenceMetadata max_value */
+            max_value?: (number|Long|null);
+        }
+
+        /** Represents a SequenceMetadata. */
+        class SequenceMetadata implements ISequenceMetadata {
+
+            /**
+             * Constructs a new SequenceMetadata.
+             * @param [properties] Properties to set
+             */
+            constructor(properties?: tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata);
+
+            /** SequenceMetadata backing_table_name. */
+            public backing_table_name: string;
+
+            /** SequenceMetadata backing_table_db_name. */
+            public backing_table_db_name: string;
+
+            /** SequenceMetadata max_value. */
+            public max_value: (number|Long);
+
+            /**
+             * Creates a new SequenceMetadata instance using the specified properties.
+             * @param [properties] Properties to set
+             * @returns SequenceMetadata instance
+             */
+            public static create(properties?: tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata): tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata;
+
+            /**
+             * Encodes the specified SequenceMetadata message. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata.verify|verify} messages.
+             * @param message SequenceMetadata message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encode(message: tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Encodes the specified SequenceMetadata message, length delimited. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata.verify|verify} messages.
+             * @param message SequenceMetadata message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encodeDelimited(message: tabletmanagerdata.UpdateSequenceTablesRequest.ISequenceMetadata, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Decodes a SequenceMetadata message from the specified reader or buffer.
+             * @param reader Reader or buffer to decode from
+             * @param [length] Message length if known beforehand
+             * @returns SequenceMetadata
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata;
+
+            /**
+             * Decodes a SequenceMetadata message from the specified reader or buffer, length delimited.
+             * @param reader Reader or buffer to decode from
+             * @returns SequenceMetadata
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata;
+
+            /**
+             * Verifies a SequenceMetadata message.
+             * @param message Plain object to verify
+             * @returns `null` if valid, otherwise the reason why it is not
+             */
+            public static verify(message: { [k: string]: any }): (string|null);
+
+            /**
+             * Creates a SequenceMetadata message from a plain object. Also converts values to their respective internal types.
+             * @param object Plain object
+             * @returns SequenceMetadata
+             */
+            public static fromObject(object: { [k: string]: any }): tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata;
+
+            /**
+             * Creates a plain object from a SequenceMetadata message. Also converts values to other types if specified.
+             * @param message SequenceMetadata
+             * @param [options] Conversion options
+             * @returns Plain object
+             */
+            public static toObject(message: tabletmanagerdata.UpdateSequenceTablesRequest.SequenceMetadata, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+            /**
+             * Converts this SequenceMetadata to JSON.
+             * @returns JSON object
+             */
+            public toJSON(): { [k: string]: any };
+
+            /**
+             * Gets the default type url for SequenceMetadata
+             * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+             * @returns The default type url
+             */
+            public static getTypeUrl(typeUrlPrefix?: string): string;
+        }
+    }
+
+    /** Properties of an UpdateSequenceTablesResponse. */
+    interface IUpdateSequenceTablesResponse {
+    }
+
+    /** Represents an UpdateSequenceTablesResponse. */
+    class UpdateSequenceTablesResponse implements IUpdateSequenceTablesResponse {
+
+        /**
+         * Constructs a new UpdateSequenceTablesResponse.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IUpdateSequenceTablesResponse);
+
+        /**
+         * Creates a new UpdateSequenceTablesResponse instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns UpdateSequenceTablesResponse instance
+         */
+        public static create(properties?: tabletmanagerdata.IUpdateSequenceTablesResponse): tabletmanagerdata.UpdateSequenceTablesResponse;
+
+        /**
+         * Encodes the specified UpdateSequenceTablesResponse message. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesResponse.verify|verify} messages.
+         * @param message UpdateSequenceTablesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IUpdateSequenceTablesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified UpdateSequenceTablesResponse message, length delimited. Does not implicitly {@link tabletmanagerdata.UpdateSequenceTablesResponse.verify|verify} messages.
+         * @param message UpdateSequenceTablesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IUpdateSequenceTablesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes an UpdateSequenceTablesResponse message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns UpdateSequenceTablesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.UpdateSequenceTablesResponse;
+
+        /**
+         * Decodes an UpdateSequenceTablesResponse message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns UpdateSequenceTablesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.UpdateSequenceTablesResponse;
+
+        /**
+         * Verifies an UpdateSequenceTablesResponse message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates an UpdateSequenceTablesResponse message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns UpdateSequenceTablesResponse
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.UpdateSequenceTablesResponse;
+
+        /**
+         * Creates a plain object from an UpdateSequenceTablesResponse message. Also converts values to other types if specified.
+         * @param message UpdateSequenceTablesResponse
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.UpdateSequenceTablesResponse, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this UpdateSequenceTablesResponse to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for UpdateSequenceTablesResponse
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a GetMaxValueForSequencesRequest. */
+    interface IGetMaxValueForSequencesRequest {
+
+        /** GetMaxValueForSequencesRequest sequences */
+        sequences?: (tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata[]|null);
+    }
+
+    /** Represents a GetMaxValueForSequencesRequest. */
+    class GetMaxValueForSequencesRequest implements IGetMaxValueForSequencesRequest {
+
+        /**
+         * Constructs a new GetMaxValueForSequencesRequest.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IGetMaxValueForSequencesRequest);
+
+        /** GetMaxValueForSequencesRequest sequences. */
+        public sequences: tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata[];
+
+        /**
+         * Creates a new GetMaxValueForSequencesRequest instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns GetMaxValueForSequencesRequest instance
+         */
+        public static create(properties?: tabletmanagerdata.IGetMaxValueForSequencesRequest): tabletmanagerdata.GetMaxValueForSequencesRequest;
+
+        /**
+         * Encodes the specified GetMaxValueForSequencesRequest message. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesRequest.verify|verify} messages.
+         * @param message GetMaxValueForSequencesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IGetMaxValueForSequencesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified GetMaxValueForSequencesRequest message, length delimited. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesRequest.verify|verify} messages.
+         * @param message GetMaxValueForSequencesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IGetMaxValueForSequencesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a GetMaxValueForSequencesRequest message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns GetMaxValueForSequencesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.GetMaxValueForSequencesRequest;
+
+        /**
+         * Decodes a GetMaxValueForSequencesRequest message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns GetMaxValueForSequencesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.GetMaxValueForSequencesRequest;
+
+        /**
+         * Verifies a GetMaxValueForSequencesRequest message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a GetMaxValueForSequencesRequest message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns GetMaxValueForSequencesRequest
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.GetMaxValueForSequencesRequest;
+
+        /**
+         * Creates a plain object from a GetMaxValueForSequencesRequest message. Also converts values to other types if specified.
+         * @param message GetMaxValueForSequencesRequest
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.GetMaxValueForSequencesRequest, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this GetMaxValueForSequencesRequest to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for GetMaxValueForSequencesRequest
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    namespace GetMaxValueForSequencesRequest {
+
+        /** Properties of a SequenceMetadata. */
+        interface ISequenceMetadata {
+
+            /** SequenceMetadata backing_table_name */
+            backing_table_name?: (string|null);
+
+            /** SequenceMetadata using_col_escaped */
+            using_col_escaped?: (string|null);
+
+            /** SequenceMetadata using_table_name_escaped */
+            using_table_name_escaped?: (string|null);
+
+            /** SequenceMetadata using_table_db_name_escaped */
+            using_table_db_name_escaped?: (string|null);
+        }
+
+        /** Represents a SequenceMetadata. */
+        class SequenceMetadata implements ISequenceMetadata {
+
+            /**
+             * Constructs a new SequenceMetadata.
+             * @param [properties] Properties to set
+             */
+            constructor(properties?: tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata);
+
+            /** SequenceMetadata backing_table_name. */
+            public backing_table_name: string;
+
+            /** SequenceMetadata using_col_escaped. */
+            public using_col_escaped: string;
+
+            /** SequenceMetadata using_table_name_escaped. */
+            public using_table_name_escaped: string;
+
+            /** SequenceMetadata using_table_db_name_escaped. */
+            public using_table_db_name_escaped: string;
+
+            /**
+             * Creates a new SequenceMetadata instance using the specified properties.
+             * @param [properties] Properties to set
+             * @returns SequenceMetadata instance
+             */
+            public static create(properties?: tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata): tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata;
+
+            /**
+             * Encodes the specified SequenceMetadata message. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata.verify|verify} messages.
+             * @param message SequenceMetadata message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encode(message: tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Encodes the specified SequenceMetadata message, length delimited. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata.verify|verify} messages.
+             * @param message SequenceMetadata message or plain object to encode
+             * @param [writer] Writer to encode to
+             * @returns Writer
+             */
+            public static encodeDelimited(message: tabletmanagerdata.GetMaxValueForSequencesRequest.ISequenceMetadata, writer?: $protobuf.Writer): $protobuf.Writer;
+
+            /**
+             * Decodes a SequenceMetadata message from the specified reader or buffer.
+             * @param reader Reader or buffer to decode from
+             * @param [length] Message length if known beforehand
+             * @returns SequenceMetadata
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata;
+
+            /**
+             * Decodes a SequenceMetadata message from the specified reader or buffer, length delimited.
+             * @param reader Reader or buffer to decode from
+             * @returns SequenceMetadata
+             * @throws {Error} If the payload is not a reader or valid buffer
+             * @throws {$protobuf.util.ProtocolError} If required fields are missing
+             */
+            public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata;
+
+            /**
+             * Verifies a SequenceMetadata message.
+             * @param message Plain object to verify
+             * @returns `null` if valid, otherwise the reason why it is not
+             */
+            public static verify(message: { [k: string]: any }): (string|null);
+
+            /**
+             * Creates a SequenceMetadata message from a plain object. Also converts values to their respective internal types.
+             * @param object Plain object
+             * @returns SequenceMetadata
+             */
+            public static fromObject(object: { [k: string]: any }): tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata;
+
+            /**
+             * Creates a plain object from a SequenceMetadata message. Also converts values to other types if specified.
+             * @param message SequenceMetadata
+             * @param [options] Conversion options
+             * @returns Plain object
+             */
+            public static toObject(message: tabletmanagerdata.GetMaxValueForSequencesRequest.SequenceMetadata, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+            /**
+             * Converts this SequenceMetadata to JSON.
+             * @returns JSON object
+             */
+            public toJSON(): { [k: string]: any };
+
+            /**
+             * Gets the default type url for SequenceMetadata
+             * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+             * @returns The default type url
+             */
+            public static getTypeUrl(typeUrlPrefix?: string): string;
+        }
+    }
+
+    /** Properties of a GetMaxValueForSequencesResponse. */
+    interface IGetMaxValueForSequencesResponse {
+
+        /** GetMaxValueForSequencesResponse max_values_by_sequence_table */
+        max_values_by_sequence_table?: ({ [k: string]: (number|Long) }|null);
+    }
+
+    /** Represents a GetMaxValueForSequencesResponse. */
+    class GetMaxValueForSequencesResponse implements IGetMaxValueForSequencesResponse {
+
+        /**
+         * Constructs a new GetMaxValueForSequencesResponse.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: tabletmanagerdata.IGetMaxValueForSequencesResponse);
+
+        /** GetMaxValueForSequencesResponse max_values_by_sequence_table. */
+        public max_values_by_sequence_table: { [k: string]: (number|Long) };
+
+        /**
+         * Creates a new GetMaxValueForSequencesResponse instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns GetMaxValueForSequencesResponse instance
+         */
+        public static create(properties?: tabletmanagerdata.IGetMaxValueForSequencesResponse): tabletmanagerdata.GetMaxValueForSequencesResponse;
+
+        /**
+         * Encodes the specified GetMaxValueForSequencesResponse message. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesResponse.verify|verify} messages.
+         * @param message GetMaxValueForSequencesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: tabletmanagerdata.IGetMaxValueForSequencesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified GetMaxValueForSequencesResponse message, length delimited. Does not implicitly {@link tabletmanagerdata.GetMaxValueForSequencesResponse.verify|verify} messages.
+         * @param message GetMaxValueForSequencesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: tabletmanagerdata.IGetMaxValueForSequencesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a GetMaxValueForSequencesResponse message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns GetMaxValueForSequencesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): tabletmanagerdata.GetMaxValueForSequencesResponse;
+
+        /**
+         * Decodes a GetMaxValueForSequencesResponse message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns GetMaxValueForSequencesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): tabletmanagerdata.GetMaxValueForSequencesResponse;
+
+        /**
+         * Verifies a GetMaxValueForSequencesResponse message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a GetMaxValueForSequencesResponse message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns GetMaxValueForSequencesResponse
+         */
+        public static fromObject(object: { [k: string]: any }): tabletmanagerdata.GetMaxValueForSequencesResponse;
+
+        /**
+         * Creates a plain object from a GetMaxValueForSequencesResponse message. Also converts values to other types if specified.
+         * @param message GetMaxValueForSequencesResponse
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: tabletmanagerdata.GetMaxValueForSequencesResponse, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this GetMaxValueForSequencesResponse to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for GetMaxValueForSequencesResponse
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
 }
 
 /** Namespace binlogdata. */
@@ -37686,7 +38708,8 @@ export namespace binlogdata {
         VERSION = 17,
         LASTPK = 18,
         SAVEPOINT = 19,
-        COPY_COMPLETED = 20
+        COPY_COMPLETED = 20,
+        PREVIOUS_GTIDS = 21
     }
 
     /** Properties of a RowChange. */
@@ -38665,6 +39688,15 @@ export namespace binlogdata {
 
         /** VEvent throttled_reason */
         throttled_reason?: (string|null);
+
+        /** VEvent commit_parent */
+        commit_parent?: (number|Long|null);
+
+        /** VEvent sequence_number */
+        sequence_number?: (number|Long|null);
+
+        /** VEvent event_gtid */
+        event_gtid?: (string|null);
     }
 
     /** Represents a VEvent. */
@@ -38720,6 +39752,15 @@ export namespace binlogdata {
 
         /** VEvent throttled_reason. */
         public throttled_reason: string;
+
+        /** VEvent commit_parent. */
+        public commit_parent: (number|Long);
+
+        /** VEvent sequence_number. */
+        public sequence_number: (number|Long);
+
+        /** VEvent event_gtid. */
+        public event_gtid: string;
 
         /**
          * Creates a new VEvent instance using the specified properties.
@@ -39019,6 +40060,9 @@ export namespace binlogdata {
 
         /** VStreamOptions config_overrides */
         config_overrides?: ({ [k: string]: string }|null);
+
+        /** VStreamOptions tables_to_copy */
+        tables_to_copy?: (string[]|null);
     }
 
     /** Represents a VStreamOptions. */
@@ -39035,6 +40079,9 @@ export namespace binlogdata {
 
         /** VStreamOptions config_overrides. */
         public config_overrides: { [k: string]: string };
+
+        /** VStreamOptions tables_to_copy. */
+        public tables_to_copy: string[];
 
         /**
          * Creates a new VStreamOptions instance using the specified properties.
@@ -40686,8 +41733,8 @@ export namespace query {
         HEXVAL = 4129,
         BITNUM = 4130,
         VECTOR = 2083,
-        RAW = 2084,
-        ROW_TUPLE = 2085
+        RAW = 36,
+        ROW_TUPLE = 37
     }
 
     /** Properties of a Value. */
@@ -41052,6 +42099,9 @@ export namespace query {
 
         /** ExecuteOptions in_dml_execution */
         in_dml_execution?: (boolean|null);
+
+        /** ExecuteOptions transaction_timeout */
+        transaction_timeout?: (number|Long|null);
     }
 
     /** Represents an ExecuteOptions. */
@@ -41107,6 +42157,9 @@ export namespace query {
 
         /** ExecuteOptions in_dml_execution. */
         public in_dml_execution: boolean;
+
+        /** ExecuteOptions transaction_timeout. */
+        public transaction_timeout?: (number|Long|null);
 
         /** ExecuteOptions timeout. */
         public timeout?: "authoritative_timeout";
@@ -50974,7 +52027,8 @@ export namespace vtctldata {
     enum MaterializationIntent {
         CUSTOM = 0,
         MOVETABLES = 1,
-        CREATELOOKUPINDEX = 2
+        CREATELOOKUPINDEX = 2,
+        REFERENCE = 3
     }
 
     /** Properties of a TableMaterializeSettings. */
@@ -51966,6 +53020,9 @@ export namespace vtctldata {
 
         /** WorkflowOptions global_keyspace */
         global_keyspace?: (string|null);
+
+        /** WorkflowOptions lookup_vindexes */
+        lookup_vindexes?: (string[]|null);
     }
 
     /** Represents a WorkflowOptions. */
@@ -51991,6 +53048,9 @@ export namespace vtctldata {
 
         /** WorkflowOptions global_keyspace. */
         public global_keyspace: string;
+
+        /** WorkflowOptions lookup_vindexes. */
+        public lookup_vindexes: string[];
 
         /**
          * Creates a new WorkflowOptions instance using the specified properties.
@@ -67438,6 +68498,212 @@ export namespace vtctldata {
         public static getTypeUrl(typeUrlPrefix?: string): string;
     }
 
+    /** Properties of a WorkflowAddTablesRequest. */
+    interface IWorkflowAddTablesRequest {
+
+        /** WorkflowAddTablesRequest workflow */
+        workflow?: (string|null);
+
+        /** WorkflowAddTablesRequest keyspace */
+        keyspace?: (string|null);
+
+        /** WorkflowAddTablesRequest table_settings */
+        table_settings?: (vtctldata.ITableMaterializeSettings[]|null);
+
+        /** WorkflowAddTablesRequest materialization_intent */
+        materialization_intent?: (vtctldata.MaterializationIntent|null);
+    }
+
+    /** Represents a WorkflowAddTablesRequest. */
+    class WorkflowAddTablesRequest implements IWorkflowAddTablesRequest {
+
+        /**
+         * Constructs a new WorkflowAddTablesRequest.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtctldata.IWorkflowAddTablesRequest);
+
+        /** WorkflowAddTablesRequest workflow. */
+        public workflow: string;
+
+        /** WorkflowAddTablesRequest keyspace. */
+        public keyspace: string;
+
+        /** WorkflowAddTablesRequest table_settings. */
+        public table_settings: vtctldata.ITableMaterializeSettings[];
+
+        /** WorkflowAddTablesRequest materialization_intent. */
+        public materialization_intent: vtctldata.MaterializationIntent;
+
+        /**
+         * Creates a new WorkflowAddTablesRequest instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns WorkflowAddTablesRequest instance
+         */
+        public static create(properties?: vtctldata.IWorkflowAddTablesRequest): vtctldata.WorkflowAddTablesRequest;
+
+        /**
+         * Encodes the specified WorkflowAddTablesRequest message. Does not implicitly {@link vtctldata.WorkflowAddTablesRequest.verify|verify} messages.
+         * @param message WorkflowAddTablesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtctldata.IWorkflowAddTablesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified WorkflowAddTablesRequest message, length delimited. Does not implicitly {@link vtctldata.WorkflowAddTablesRequest.verify|verify} messages.
+         * @param message WorkflowAddTablesRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtctldata.IWorkflowAddTablesRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a WorkflowAddTablesRequest message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns WorkflowAddTablesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtctldata.WorkflowAddTablesRequest;
+
+        /**
+         * Decodes a WorkflowAddTablesRequest message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns WorkflowAddTablesRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtctldata.WorkflowAddTablesRequest;
+
+        /**
+         * Verifies a WorkflowAddTablesRequest message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a WorkflowAddTablesRequest message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns WorkflowAddTablesRequest
+         */
+        public static fromObject(object: { [k: string]: any }): vtctldata.WorkflowAddTablesRequest;
+
+        /**
+         * Creates a plain object from a WorkflowAddTablesRequest message. Also converts values to other types if specified.
+         * @param message WorkflowAddTablesRequest
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtctldata.WorkflowAddTablesRequest, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this WorkflowAddTablesRequest to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for WorkflowAddTablesRequest
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a WorkflowAddTablesResponse. */
+    interface IWorkflowAddTablesResponse {
+    }
+
+    /** Represents a WorkflowAddTablesResponse. */
+    class WorkflowAddTablesResponse implements IWorkflowAddTablesResponse {
+
+        /**
+         * Constructs a new WorkflowAddTablesResponse.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtctldata.IWorkflowAddTablesResponse);
+
+        /**
+         * Creates a new WorkflowAddTablesResponse instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns WorkflowAddTablesResponse instance
+         */
+        public static create(properties?: vtctldata.IWorkflowAddTablesResponse): vtctldata.WorkflowAddTablesResponse;
+
+        /**
+         * Encodes the specified WorkflowAddTablesResponse message. Does not implicitly {@link vtctldata.WorkflowAddTablesResponse.verify|verify} messages.
+         * @param message WorkflowAddTablesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtctldata.IWorkflowAddTablesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified WorkflowAddTablesResponse message, length delimited. Does not implicitly {@link vtctldata.WorkflowAddTablesResponse.verify|verify} messages.
+         * @param message WorkflowAddTablesResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtctldata.IWorkflowAddTablesResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a WorkflowAddTablesResponse message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns WorkflowAddTablesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtctldata.WorkflowAddTablesResponse;
+
+        /**
+         * Decodes a WorkflowAddTablesResponse message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns WorkflowAddTablesResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtctldata.WorkflowAddTablesResponse;
+
+        /**
+         * Verifies a WorkflowAddTablesResponse message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a WorkflowAddTablesResponse message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns WorkflowAddTablesResponse
+         */
+        public static fromObject(object: { [k: string]: any }): vtctldata.WorkflowAddTablesResponse;
+
+        /**
+         * Creates a plain object from a WorkflowAddTablesResponse message. Also converts values to other types if specified.
+         * @param message WorkflowAddTablesResponse
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtctldata.WorkflowAddTablesResponse, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this WorkflowAddTablesResponse to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for WorkflowAddTablesResponse
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
     /** Properties of a MigrateCreateRequest. */
     interface IMigrateCreateRequest {
 
@@ -80968,6 +82234,206 @@ export namespace vtctldata {
 
         /**
          * Gets the default type url for WorkflowMirrorTrafficResponse
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a SetVtorcEmergencyReparentRequest. */
+    interface ISetVtorcEmergencyReparentRequest {
+
+        /** SetVtorcEmergencyReparentRequest keyspace */
+        keyspace?: (string|null);
+
+        /** SetVtorcEmergencyReparentRequest shard */
+        shard?: (string|null);
+
+        /** SetVtorcEmergencyReparentRequest disable */
+        disable?: (boolean|null);
+    }
+
+    /** Represents a SetVtorcEmergencyReparentRequest. */
+    class SetVtorcEmergencyReparentRequest implements ISetVtorcEmergencyReparentRequest {
+
+        /**
+         * Constructs a new SetVtorcEmergencyReparentRequest.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtctldata.ISetVtorcEmergencyReparentRequest);
+
+        /** SetVtorcEmergencyReparentRequest keyspace. */
+        public keyspace: string;
+
+        /** SetVtorcEmergencyReparentRequest shard. */
+        public shard: string;
+
+        /** SetVtorcEmergencyReparentRequest disable. */
+        public disable: boolean;
+
+        /**
+         * Creates a new SetVtorcEmergencyReparentRequest instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns SetVtorcEmergencyReparentRequest instance
+         */
+        public static create(properties?: vtctldata.ISetVtorcEmergencyReparentRequest): vtctldata.SetVtorcEmergencyReparentRequest;
+
+        /**
+         * Encodes the specified SetVtorcEmergencyReparentRequest message. Does not implicitly {@link vtctldata.SetVtorcEmergencyReparentRequest.verify|verify} messages.
+         * @param message SetVtorcEmergencyReparentRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtctldata.ISetVtorcEmergencyReparentRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified SetVtorcEmergencyReparentRequest message, length delimited. Does not implicitly {@link vtctldata.SetVtorcEmergencyReparentRequest.verify|verify} messages.
+         * @param message SetVtorcEmergencyReparentRequest message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtctldata.ISetVtorcEmergencyReparentRequest, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a SetVtorcEmergencyReparentRequest message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns SetVtorcEmergencyReparentRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtctldata.SetVtorcEmergencyReparentRequest;
+
+        /**
+         * Decodes a SetVtorcEmergencyReparentRequest message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns SetVtorcEmergencyReparentRequest
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtctldata.SetVtorcEmergencyReparentRequest;
+
+        /**
+         * Verifies a SetVtorcEmergencyReparentRequest message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a SetVtorcEmergencyReparentRequest message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns SetVtorcEmergencyReparentRequest
+         */
+        public static fromObject(object: { [k: string]: any }): vtctldata.SetVtorcEmergencyReparentRequest;
+
+        /**
+         * Creates a plain object from a SetVtorcEmergencyReparentRequest message. Also converts values to other types if specified.
+         * @param message SetVtorcEmergencyReparentRequest
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtctldata.SetVtorcEmergencyReparentRequest, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this SetVtorcEmergencyReparentRequest to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for SetVtorcEmergencyReparentRequest
+         * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
+         * @returns The default type url
+         */
+        public static getTypeUrl(typeUrlPrefix?: string): string;
+    }
+
+    /** Properties of a SetVtorcEmergencyReparentResponse. */
+    interface ISetVtorcEmergencyReparentResponse {
+    }
+
+    /** Represents a SetVtorcEmergencyReparentResponse. */
+    class SetVtorcEmergencyReparentResponse implements ISetVtorcEmergencyReparentResponse {
+
+        /**
+         * Constructs a new SetVtorcEmergencyReparentResponse.
+         * @param [properties] Properties to set
+         */
+        constructor(properties?: vtctldata.ISetVtorcEmergencyReparentResponse);
+
+        /**
+         * Creates a new SetVtorcEmergencyReparentResponse instance using the specified properties.
+         * @param [properties] Properties to set
+         * @returns SetVtorcEmergencyReparentResponse instance
+         */
+        public static create(properties?: vtctldata.ISetVtorcEmergencyReparentResponse): vtctldata.SetVtorcEmergencyReparentResponse;
+
+        /**
+         * Encodes the specified SetVtorcEmergencyReparentResponse message. Does not implicitly {@link vtctldata.SetVtorcEmergencyReparentResponse.verify|verify} messages.
+         * @param message SetVtorcEmergencyReparentResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encode(message: vtctldata.ISetVtorcEmergencyReparentResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Encodes the specified SetVtorcEmergencyReparentResponse message, length delimited. Does not implicitly {@link vtctldata.SetVtorcEmergencyReparentResponse.verify|verify} messages.
+         * @param message SetVtorcEmergencyReparentResponse message or plain object to encode
+         * @param [writer] Writer to encode to
+         * @returns Writer
+         */
+        public static encodeDelimited(message: vtctldata.ISetVtorcEmergencyReparentResponse, writer?: $protobuf.Writer): $protobuf.Writer;
+
+        /**
+         * Decodes a SetVtorcEmergencyReparentResponse message from the specified reader or buffer.
+         * @param reader Reader or buffer to decode from
+         * @param [length] Message length if known beforehand
+         * @returns SetVtorcEmergencyReparentResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decode(reader: ($protobuf.Reader|Uint8Array), length?: number): vtctldata.SetVtorcEmergencyReparentResponse;
+
+        /**
+         * Decodes a SetVtorcEmergencyReparentResponse message from the specified reader or buffer, length delimited.
+         * @param reader Reader or buffer to decode from
+         * @returns SetVtorcEmergencyReparentResponse
+         * @throws {Error} If the payload is not a reader or valid buffer
+         * @throws {$protobuf.util.ProtocolError} If required fields are missing
+         */
+        public static decodeDelimited(reader: ($protobuf.Reader|Uint8Array)): vtctldata.SetVtorcEmergencyReparentResponse;
+
+        /**
+         * Verifies a SetVtorcEmergencyReparentResponse message.
+         * @param message Plain object to verify
+         * @returns `null` if valid, otherwise the reason why it is not
+         */
+        public static verify(message: { [k: string]: any }): (string|null);
+
+        /**
+         * Creates a SetVtorcEmergencyReparentResponse message from a plain object. Also converts values to their respective internal types.
+         * @param object Plain object
+         * @returns SetVtorcEmergencyReparentResponse
+         */
+        public static fromObject(object: { [k: string]: any }): vtctldata.SetVtorcEmergencyReparentResponse;
+
+        /**
+         * Creates a plain object from a SetVtorcEmergencyReparentResponse message. Also converts values to other types if specified.
+         * @param message SetVtorcEmergencyReparentResponse
+         * @param [options] Conversion options
+         * @returns Plain object
+         */
+        public static toObject(message: vtctldata.SetVtorcEmergencyReparentResponse, options?: $protobuf.IConversionOptions): { [k: string]: any };
+
+        /**
+         * Converts this SetVtorcEmergencyReparentResponse to JSON.
+         * @returns JSON object
+         */
+        public toJSON(): { [k: string]: any };
+
+        /**
+         * Gets the default type url for SetVtorcEmergencyReparentResponse
          * @param [typeUrlPrefix] your custom typeUrlPrefix(default "type.googleapis.com")
          * @returns The default type url
          */

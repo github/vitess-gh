@@ -51,6 +51,7 @@ const (
 	ReplicaMisconfigured                   AnalysisCode = "ReplicaMisconfigured"
 	UnreachablePrimaryWithLaggingReplicas  AnalysisCode = "UnreachablePrimaryWithLaggingReplicas"
 	UnreachablePrimary                     AnalysisCode = "UnreachablePrimary"
+	UnreachablePrimaryWithBrokenReplicas   AnalysisCode = "UnreachablePrimaryWithBrokenReplicas"
 	PrimarySingleReplicaNotReplicating     AnalysisCode = "PrimarySingleReplicaNotReplicating"
 	PrimarySingleReplicaDead               AnalysisCode = "PrimarySingleReplicaDead"
 	AllPrimaryReplicasNotReplicating       AnalysisCode = "AllPrimaryReplicasNotReplicating"
@@ -89,7 +90,7 @@ type DetectionAnalysisHints struct {
 	AuditAnalysis bool
 }
 
-// DetectionAnalysis notes analysis on replication chain status, per instance
+// DetectionAnalysis represents an analysis of a detected problem.
 type DetectionAnalysis struct {
 	AnalyzedInstanceAlias        string
 	AnalyzedInstancePrimaryAlias string
@@ -100,13 +101,13 @@ type DetectionAnalysis struct {
 	// CurrentTabletType is the type this tablet is currently running as.
 	CurrentTabletType topodatapb.TabletType
 
-	PrimaryTimeStamp time.Time
-	ClusterDetails   ClusterInfo
-	AnalyzedKeyspace string
-	AnalyzedShard    string
-
+	PrimaryTimeStamp                          time.Time
+	AnalyzedKeyspace                          string
+	AnalyzedShard                             string
+	AnalyzedKeyspaceEmergencyReparentDisabled bool
+	AnalyzedShardEmergencyReparentDisabled    bool
 	// ShardPrimaryTermTimestamp is the primary term start time stored in the shard record.
-	ShardPrimaryTermTimestamp                 string
+	ShardPrimaryTermTimestamp                 time.Time
 	AnalyzedInstanceBinlogCoordinates         BinlogCoordinates
 	IsPrimary                                 bool
 	IsClusterPrimary                          bool

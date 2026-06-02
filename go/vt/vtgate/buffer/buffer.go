@@ -30,6 +30,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/sync/semaphore"
 
@@ -147,7 +148,7 @@ type Buffer struct {
 	config *Config
 
 	// bufferSizeSema limits how many requests can be buffered
-	// ("-buffer_size") and is shared by all shardBuffer instances.
+	// ("-buffer-size") and is shared by all shardBuffer instances.
 	bufferSizeSema *semaphore.Weighted
 	bufferSize     int
 
@@ -156,14 +157,14 @@ type Buffer struct {
 	// - 1. Requests which may buffer (RLock, can be run in parallel)
 	// - 2. Request which starts buffering (based on the seen error)
 	// - 3. HealthCheck subscriber ("StatsUpdate") which stops buffering
-	// - 4. Timer which may stop buffering after -buffer_max_failover_duration
+	// - 4. Timer which may stop buffering after -buffer-max-failover-duration
 	mu sync.RWMutex
 	// buffers holds a shardBuffer object per shard, even if no failover is in
 	// progress.
 	// Key Format: "<keyspace>/<shard>"
 	buffers map[string]*shardBuffer
 	// stopped is true after Shutdown() was run.
-	stopped bool
+	stopped atomic.Bool
 }
 
 // New creates a new Buffer object.
@@ -223,7 +224,7 @@ func (b *Buffer) getOrCreateBuffer(keyspace, shard string) *shardBuffer {
 	key := topoproto.KeyspaceShardString(keyspace, shard)
 	b.mu.RLock()
 	sb, ok := b.buffers[key]
-	stopped := b.stopped
+	stopped := b.stopped.Load()
 	b.mu.RUnlock()
 
 	if stopped {
@@ -259,7 +260,7 @@ func (b *Buffer) shutdown() {
 	for _, sb := range b.buffers {
 		sb.shutdown()
 	}
-	b.stopped = true
+	b.stopped.Store(true)
 }
 
 func (b *Buffer) waitForShutdown() {

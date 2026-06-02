@@ -283,6 +283,11 @@ func (client *FakeTabletManagerClient) StartReplication(ctx context.Context, tab
 	return nil
 }
 
+// RestartReplication is part of the tmclient.TabletManagerClient interface.
+func (client *FakeTabletManagerClient) RestartReplication(ctx context.Context, tablet *topodatapb.Tablet, semiSync bool) error {
+	return nil
+}
+
 // StartReplicationUntilAfter is part of the tmclient.TabletManagerClient interface.
 func (client *FakeTabletManagerClient) StartReplicationUntilAfter(ctx context.Context, tablet *topodatapb.Tablet, position string, duration time.Duration) error {
 	return nil
@@ -336,6 +341,16 @@ func (client *FakeTabletManagerClient) VReplicationExec(ctx context.Context, tab
 // VReplicationWaitForPos is part of the tmclient.TabletManagerClient interface.
 func (client *FakeTabletManagerClient) VReplicationWaitForPos(ctx context.Context, tablet *topodatapb.Tablet, id int32, pos string) error {
 	return nil
+}
+
+// UpdateSequenceTables is part of the tmclient.TabletManagerClient interface.
+func (itmc *FakeTabletManagerClient) UpdateSequenceTables(ctx context.Context, tablet *topodatapb.Tablet, request *tabletmanagerdatapb.UpdateSequenceTablesRequest) (*tabletmanagerdatapb.UpdateSequenceTablesResponse, error) {
+	return nil, nil
+}
+
+// GetMaxValueForSequences is part of the tmclient.TabletManagerClient interface.
+func (itmc *FakeTabletManagerClient) GetMaxValueForSequences(ctx context.Context, tablet *topodatapb.Tablet, request *tabletmanagerdatapb.GetMaxValueForSequencesRequest) (*tabletmanagerdatapb.GetMaxValueForSequencesResponse, error) {
+	return nil, nil
 }
 
 //

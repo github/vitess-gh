@@ -27,6 +27,7 @@ import (
 	"vitess.io/vitess/go/test/endtoend/cluster"
 	"vitess.io/vitess/go/test/endtoend/utils"
 	"vitess.io/vitess/go/vt/log"
+	vtutils "vitess.io/vitess/go/vt/utils"
 )
 
 var (
@@ -42,13 +43,7 @@ var (
 	dbPassword       = "VtDbaPass"
 	shardKsName      = fmt.Sprintf("%s/%s", keyspaceName, shardName)
 	dbCredentialFile string
-	commonTabletArg  = []string{
-		"--vreplication_retry_delay", "1s",
-		"--degraded_threshold", "5s",
-		"--lock_tables_timeout", "5s",
-		"--watch_replication_stream",
-		"--enable_replication_reporter",
-		"--serving_state_grace_period", "1s"}
+	commonTabletArg  []string
 )
 
 func TestMain(m *testing.M) {
@@ -57,6 +52,16 @@ func TestMain(m *testing.M) {
 	exitCode, err := func() (int, error) {
 		localCluster = cluster.NewCluster(cell, hostname)
 		defer localCluster.Teardown()
+
+		vttabletVer := localCluster.VtTabletMajorVersion
+		commonTabletArg = []string{
+			vtutils.GetFlagVariantForTestsByVersion("--vreplication-retry-delay", vttabletVer), "1s",
+			vtutils.GetFlagVariantForTestsByVersion("--degraded-threshold", vttabletVer), "5s",
+			vtutils.GetFlagVariantForTestsByVersion("--lock-tables-timeout", vttabletVer), "5s",
+			vtutils.GetFlagVariantForTestsByVersion("--watch-replication-stream", vttabletVer),
+			vtutils.GetFlagVariantForTestsByVersion("--enable-replication-reporter", vttabletVer),
+			vtutils.GetFlagVariantForTestsByVersion("--serving-state-grace-period", vttabletVer), "1s",
+		}
 
 		// Start topo server
 		err := localCluster.StartTopo()
