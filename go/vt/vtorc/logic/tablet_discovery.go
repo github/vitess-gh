@@ -317,14 +317,6 @@ func refreshTabletsInKeyspaceShard(ctx context.Context, keyspace, shard string, 
 	refreshTablets(tablets, query, args, loader, forceRefresh, tabletsToIgnore)
 }
 
-// getShardTablets gets tablets for the given keyspace and shard with a timeout.
-func getShardTablets(ctx context.Context, keyspace, shard string) ([]*topo.TabletInfo, error) {
-	ctx, cancel := context.WithTimeout(ctx, topo.RemoteOperationTimeout)
-	defer cancel()
-
-	return ts.GetTabletsByShard(ctx, keyspace, shard)
-}
-
 func refreshTablets(tablets []*topo.TabletInfo, query string, args []any, loader func(tabletAlias string), forceRefresh bool, tabletsToIgnore []string) {
 	// Discover new tablets.
 	latestInstances := make(map[string]bool)
