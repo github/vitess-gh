@@ -341,6 +341,27 @@ func (pool *ConnPool[C]) Active() int64 {
 	return pool.active.Load()
 }
 
+// Waiters returns the number of clients currently blocked waiting to acquire a
+// connection. Note that Available() is capacity minus borrowed and therefore
+// says nothing about contention; Waiters is the metric that does.
+func (pool *ConnPool[C]) Waiters() int64 {
+	return int64(pool.wait.waiting())
+}
+
+// ExpiredHandoffs returns the number of connection returns in which a waiter
+// whose acquisition context had already expired would have received the
+// connection under the pre-fix selection rules. A non-zero value is direct
+// evidence that the pool was attempting post-deadline handoffs.
+func (pool *ConnPool[C]) ExpiredHandoffs() int64 {
+	return pool.wait.preventedHandoffs.Load()
+}
+
+// WaitersEvicted returns the total number of waiters removed from the waitlist
+// because their acquisition context had already expired.
+func (pool *ConnPool[C]) WaitersEvicted() int64 {
+	return pool.wait.evicted.Load()
+}
+
 func (pool *ConnPool[D]) IdleTimeout() time.Duration {
 	return time.Duration(pool.config.idleTimeout.Load())
 }
@@ -853,6 +874,15 @@ func (pool *ConnPool[C]) RegisterStats(stats *servenv.Exporter, name string) {
 	})
 	stats.NewCounterFunc(name+"WaitCount", "Tablet server conn pool wait count", func() int64 {
 		return pool.Metrics.WaitCount()
+	})
+	stats.NewGaugeFunc(name+"Waiters", "Tablet server conn pool waiters currently blocked on acquisition", func() int64 {
+		return pool.Waiters()
+	})
+	stats.NewCounterFunc(name+"ExpiredHandoffs", "Number of connection returns in which an expired waiter would have received the connection", func() int64 {
+		return pool.ExpiredHandoffs()
+	})
+	stats.NewCounterFunc(name+"WaitersEvicted", "Number of waiters removed from the waitlist because their acquisition context had expired", func() int64 {
+		return pool.WaitersEvicted()
 	})
 	stats.NewCounterDurationFunc(name+"WaitTime", "Tablet server wait time", func() time.Duration {
 		return pool.Metrics.WaitTime()

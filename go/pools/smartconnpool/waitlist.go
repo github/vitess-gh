@@ -19,6 +19,7 @@ package smartconnpool
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"vitess.io/vitess/go/list"
 )
@@ -43,6 +44,17 @@ type waitlist[C Connection] struct {
 	nodes sync.Pool
 	mu    sync.Mutex
 	list  list.List[waiter[C]]
+
+	// evicted counts waiters removed from the list because their acquisition
+	// context had already expired.
+	evicted atomic.Int64
+	// preventedHandoffs counts returns in which an expired waiter would have
+	// received the connection under the pre-fix selection rules, i.e. it was at
+	// the front of the list (the default target) or its Setting matched the
+	// returned connection (the explicit break condition). This is the direct
+	// answer to "did a returner attempt to hand a connection to an expired
+	// waiter?" without requiring inference from aggregate latency.
+	preventedHandoffs atomic.Int64
 }
 
 // waitForConn blocks until a connection with the given Setting is returned by another client,
@@ -157,6 +169,9 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		target      *list.Element[waiter[D]]
 		expired     []*list.Element[waiter[D]]
 		connSetting = conn.Conn.Setting()
+
+		idx                 int
+		expiredWouldHandoff bool
 	)
 
 	wl.mu.Lock()
@@ -173,10 +188,15 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// anywhere in the list, not just at the front, because deadlines are
 		// heterogeneous, so the whole scan has to check.
 		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+			if idx == 0 || e.Value.setting == connSetting {
+				expiredWouldHandoff = true
+			}
 			wl.list.Remove(e)
 			expired = append(expired, e)
+			idx++
 			continue
 		}
+		idx++
 
 		if target == nil {
 			// front-most live waiter, used unless a better match is found below
@@ -203,6 +223,12 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	// after releasing the lock: an evicted waiter is blocked on its semaphore
 	// and cannot return (nor recycle its list element) until we notify it, and
 	// because we removed it from the list under the lock nobody else can.
+	if n := len(expired); n > 0 {
+		wl.evicted.Add(int64(n))
+		if expiredWouldHandoff {
+			wl.preventedHandoffs.Add(1)
+		}
+	}
 	for _, e := range expired {
 		e.Value.sema.notify(false)
 	}
