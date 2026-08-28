@@ -70,17 +70,10 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	select {
 	case <-closeChan:
 		// Pool was closed while we were waiting.
-		removed := false
-
+		// Try to remove ourselves from the list. If we lose the race against
+		// tryReturnConnSlow, it owns the element and will notify our semaphore.
 		wl.mu.Lock()
-		// Try to find and remove ourselves from the list.
-		for e := wl.list.Front(); e != nil; e = e.Next() {
-			if e == elem {
-				wl.list.Remove(elem)
-				removed = true
-				break
-			}
-		}
+		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
 		// If we removed ourselves from the waitlist, we need to notify our semaphore
@@ -100,17 +93,10 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	case <-ctx.Done():
 		// Context expired. We need to try to remove ourselves from the waitlist to
 		// prevent another goroutine from trying to hand us a connection later on.
-		removed := false
-
+		// If we lose the race against tryReturnConnSlow, it owns the element and
+		// will notify our semaphore.
 		wl.mu.Lock()
-		// Try to find and remove ourselves from the list.
-		for e := wl.list.Front(); e != nil; e = e.Next() {
-			if e == elem {
-				wl.list.Remove(elem)
-				removed = true
-				break
-			}
-		}
+		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
 		// If we removed ourselves from the waitlist, we need to notify our semaphore
@@ -140,9 +126,13 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
 
-	// iterate the waitlist looking for waiters with an expired Context,
-	// or remove everything if force is true
+	// iterate the waitlist looking for waiters that are still live and have not
+	// been skipped over yet. Waiters whose context has already expired are not
+	// counted: opening a new connection on their behalf would be wasted work.
 	for e := wl.list.Front(); e != nil; e = e.Next() {
+		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+			continue
+		}
 		if e.Value.age == 0 {
 			maybeStarving++
 		}
@@ -165,15 +155,33 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	const maxAge = 8
 	var (
 		target      *list.Element[waiter[D]]
+		expired     []*list.Element[waiter[D]]
 		connSetting = conn.Conn.Setting()
 	)
 
 	wl.mu.Lock()
-	target = wl.list.Front()
-	// iterate through the waitlist looking for either waiters that have been
-	// here too long, or a waiter that is looking exactly for the same Setting
-	// as the one we have in our connection.
-	for e := target; e != nil; e = e.Next() {
+	var next *list.Element[waiter[D]]
+	for e := wl.list.Front(); e != nil; e = next {
+		// capture the successor before a possible Remove unlinks e
+		next = e.Next()
+
+		// Never hand a connection over to a waiter whose context has already
+		// expired: that waiter can no longer use it, and for the transaction
+		// pool the subsequent failed Begin closes the connection and forces a
+		// fresh dial. Evict the expired waiter instead so the connection stays
+		// available for a waiter that can still use it. Expired waiters can sit
+		// anywhere in the list, not just at the front, because deadlines are
+		// heterogeneous, so the whole scan has to check.
+		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+			wl.list.Remove(e)
+			expired = append(expired, e)
+			continue
+		}
+
+		if target == nil {
+			// front-most live waiter, used unless a better match is found below
+			target = e
+		}
 		if e.Value.age > maxAge || e.Value.setting == connSetting {
 			target = e
 			break
@@ -189,6 +197,15 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		wl.list.Remove(target)
 	}
 	wl.mu.Unlock()
+
+	// Wake the evicted waiters. Their conn stays nil, which waitForConn hands
+	// back to the caller and which Get maps to a timeout. This is safe to do
+	// after releasing the lock: an evicted waiter is blocked on its semaphore
+	// and cannot return (nor recycle its list element) until we notify it, and
+	// because we removed it from the list under the lock nobody else can.
+	for _, e := range expired {
+		e.Value.sema.notify(false)
+	}
 
 	// maybe there isn't anybody to hand over the connection to, because we've
 	// raced with another client returning another connection
