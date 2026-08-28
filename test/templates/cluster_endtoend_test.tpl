@@ -133,8 +133,8 @@ jobs:
         curl -L -O http://mirrors.kernel.org/ubuntu/pool/main/liba/libaio/libaio1_0.3.112-13build1_amd64.deb
         sudo dpkg -i libaio1_0.3.112-13build1_amd64.deb
         # libtinfo5 is also needed for older MySQL 5.7 builds.
-        curl -L -O http://mirrors.kernel.org/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        curl -L -O http://mirrors.kernel.org/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.2_amd64.deb
+        sudo dpkg -i libtinfo5_6.3-2ubuntu0.2_amd64.deb
 
         # Install everything else we need, and configure
         sudo apt-get -qq install -y mysql-server mysql-shell mysql-client make unzip g++ etcd-client etcd-server curl git wget eatmydata xz-utils libncurses6
