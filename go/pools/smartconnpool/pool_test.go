@@ -1294,7 +1294,7 @@ func TestIdleTimeoutConnectionLeak(t *testing.T) {
 		LogWait:     state.LogWait,
 	}).Open(newConnector(&state), nil)
 
-	getCtx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	getCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	// Get and return two connections
@@ -1328,15 +1328,18 @@ func TestIdleTimeoutConnectionLeak(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	for i := 0; i < 2; i++ {
-		wg.Go(func() {
-			getCtx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			getCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 			defer cancel()
 
 			conn, err := p.Get(getCtx, nil)
 			require.NoError(t, err)
 
 			p.put(conn)
-		})
+		}()
 	}
 
 	wg.Wait()
@@ -1356,7 +1359,7 @@ func TestIdleTimeoutConnectionLeak(t *testing.T) {
 	assert.Equal(t, int64(2), p.Metrics.IdleClosed())
 
 	// Try to close the pool - if there are leaked connections, this will timeout
-	closeCtx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	closeCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	err = p.CloseWithContext(closeCtx)
@@ -1446,7 +1449,7 @@ func BenchmarkPoolCleanupIdleConnectionsPerformanceNoIdleConnections(b *testing.
 
 	b.ResetTimer()
 
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		p.closeIdleResources(time.Now())
 	}
 }
