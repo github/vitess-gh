@@ -89,4 +89,4 @@ jobs:
         timeout-minutes: 60
         run: |
           source build.env
-          go run test.go -docker=false -skip-build -print-log -follow -retry=1 -timeout=60m vtop_example
+          go run test.go -docker=false -skip-build -print-log -follow -timeout=60m vtop_example
