@@ -19,6 +19,7 @@ package smartconnpool
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"vitess.io/vitess/go/list"
 )
@@ -43,6 +44,25 @@ type waitlist[C Connection] struct {
 	nodes sync.Pool
 	mu    sync.Mutex
 	list  list.List[waiter[C]]
+
+	// evicted counts waiters removed from the list because their acquisition
+	// context had already expired.
+	evicted atomic.Int64
+	// preventedHandoffs counts returns in which the waiter that the pre-fix
+	// (pristine v21) selection rule would have picked was expired, so that
+	// before this fix the connection would have been handed to a waiter that
+	// could no longer use it. It is an exact count: the pre-fix target is
+	// reconstructed in full on every return (see tryReturnConnSlow), including
+	// the age > maxAge branch, the Setting-match branch and the front-element
+	// default. This is the direct answer to "would this return have handed a
+	// connection to an expired waiter?" without inference from aggregate
+	// latency.
+	//
+	// The reconstruction is per-return, against the waitlist as it exists at
+	// that instant. It is not a replay of a pristine process: once this fix
+	// evicts expired waiters the two histories necessarily diverge, because
+	// pristine would have kept ageing waiters that we remove.
+	preventedHandoffs atomic.Int64
 }
 
 // waitForConn blocks until a connection with the given Setting is returned by another client,
@@ -157,6 +177,18 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		target      *list.Element[waiter[D]]
 		expired     []*list.Element[waiter[D]]
 		connSetting = conn.Conn.Setting()
+
+		// Exact reconstruction of the pre-fix (pristine v21) selection rule so
+		// that preventedHandoffs is a count rather than an indicator. Pristine
+		// scanned from the front and took the first waiter satisfying
+		// age > maxAge || setting == connSetting, falling back to the front
+		// element when nothing matched. It had no notion of contexts, so an
+		// expired waiter could win through any of those three routes. We
+		// evaluate that predicate on every element, in the original order, in
+		// this same pass: no second scan and no extra time under the lock.
+		legacyDecided bool
+		legacySeen    bool
+		legacyExpired bool
 	)
 
 	wl.mu.Lock()
@@ -172,7 +204,25 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// available for a waiter that can still use it. Expired waiters can sit
 		// anywhere in the list, not just at the front, because deadlines are
 		// heterogeneous, so the whole scan has to check.
-		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+		isExpired := e.Value.ctx != nil && e.Value.ctx.Err() != nil
+
+		// Reconstruct the pre-fix target. This runs for every element, expired
+		// or not, in the original order and before any unlinking, because the
+		// pre-fix rule scanned the list without regard to contexts. Evaluated
+		// before the ageing below so it sees the same age the pre-fix scan
+		// would have seen.
+		if !legacyDecided {
+			if !legacySeen {
+				legacySeen = true
+				legacyExpired = isExpired // pre-fix default target: the front element
+			}
+			if e.Value.age > maxAge || e.Value.setting == connSetting {
+				legacyExpired = isExpired
+				legacyDecided = true
+			}
+		}
+
+		if isExpired {
 			wl.list.Remove(e)
 			expired = append(expired, e)
 			continue
@@ -203,6 +253,12 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	// after releasing the lock: an evicted waiter is blocked on its semaphore
 	// and cannot return (nor recycle its list element) until we notify it, and
 	// because we removed it from the list under the lock nobody else can.
+	if n := len(expired); n > 0 {
+		wl.evicted.Add(int64(n))
+	}
+	if legacyExpired {
+		wl.preventedHandoffs.Add(1)
+	}
 	for _, e := range expired {
 		e.Value.sema.notify(false)
 	}
