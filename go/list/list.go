@@ -142,6 +142,18 @@ func (l *List[T]) Remove(e *Element[T]) {
 	l.remove(e)
 }
 
+// RemoveIfPresent removes e from l if e is currently an element of l, and
+// reports whether it was removed. Unlike Remove, it does not panic when e does
+// not belong to l, so callers that may race with another goroutine removing e
+// can use the return value to decide who owns the element.
+func (l *List[T]) RemoveIfPresent(e *Element[T]) bool {
+	if e.list != l {
+		return false
+	}
+	l.remove(e)
+	return true
+}
+
 // PushFront inserts a new element e with value v at the front of list l and returns e.
 func (l *List[T]) PushFront(v T) *Element[T] {
 	return l.insertValue(v, &l.root)

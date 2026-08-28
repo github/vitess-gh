@@ -613,7 +613,7 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 		}
 
 		conn, err = pool.wait.waitForConn(ctx, nil, *closeChan)
-		if err != nil {
+		if err != nil || conn == nil {
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
@@ -676,7 +676,7 @@ func (pool *ConnPool[C]) getWithSetting(ctx context.Context, setting *Setting) (
 		}
 
 		conn, err = pool.wait.waitForConn(ctx, setting, *closeChan)
-		if err != nil {
+		if err != nil || conn == nil {
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
