@@ -212,6 +212,19 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	}
 	wl.mu.Unlock()
 
+	// Hand the connection over before waking the evicted waiters. The target is
+	// the only party here with a deadline left to make; the evicted waiters are
+	// all going to return a timeout, so their wakeups must not queue in front of
+	// the handoff. Under mass expiry that ordering is the difference between the
+	// target being notified immediately and being notified after N semaphore
+	// releases, which would widen the window in which it expires post-selection.
+	if target != nil {
+		// write the connection into the waiter and signal their semaphore. they'll
+		// wake up to pick up the connection.
+		target.Value.conn = conn
+		target.Value.sema.notify(true)
+	}
+
 	// Wake the evicted waiters. Their conn stays nil, which waitForConn hands
 	// back to the caller and which Get maps to a timeout.
 	//
@@ -226,18 +239,9 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		e.Value.sema.notify(false)
 	}
 
-	// maybe there isn't anybody to hand over the connection to, because we've
-	// raced with another client returning another connection
-	if target == nil {
-		return false
-	}
-
-	// if we have a target to return the connection to, simply write the connection
-	// into the waiter and signal their semaphore. they'll wake up to pick up the
-	// connection.
-	target.Value.conn = conn
-	target.Value.sema.notify(true)
-	return true
+	// target is nil when there was nobody to hand the connection to, because
+	// every waiter had expired or we raced with another returner.
+	return target != nil
 }
 
 func (wl *waitlist[C]) init() {
