@@ -144,8 +144,12 @@ func (l *List[T]) Remove(e *Element[T]) {
 
 // RemoveIfPresent removes e from l if e is currently an element of l, and
 // reports whether it was removed. Unlike Remove, it does not panic when e does
-// not belong to l, so callers that may race with another goroutine removing e
-// can use the return value to decide who owns the element.
+// not belong to l; it saves the caller a membership scan, nothing more.
+//
+// It performs no synchronisation of its own. e.list and the link fields touched
+// by remove are ordinary fields, so callers must still serialise every mutation
+// of l externally, as waitlist does with its mutex. Under that lock the return
+// value tells two contenders which of them owns e.
 func (l *List[T]) RemoveIfPresent(e *Element[T]) bool {
 	if e.list != l {
 		return false

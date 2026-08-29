@@ -183,9 +183,9 @@ func TestInteriorExpiredWaiterNotServed(t *testing.T) {
 			c.Recycle()
 		}
 	}()
-	for p.wait.waiting() < 1 {
-		time.Sleep(200 * time.Microsecond)
-	}
+	require.Eventually(t, func() bool {
+		return p.wait.waiting() >= 1
+	}, 30*time.Second, 200*time.Microsecond, "live waiter never enqueued")
 
 	// (2) EXPIRED waiter, Setting == settingA -> sits BEHIND the live waiter,
 	// and is the better `setting == connSetting` match for the returned conn.
@@ -198,9 +198,9 @@ func TestInteriorExpiredWaiterNotServed(t *testing.T) {
 			c.Recycle()
 		}
 	}()
-	for p.wait.waiting() < 2 {
-		time.Sleep(200 * time.Microsecond)
-	}
+	require.Eventually(t, func() bool {
+		return p.wait.waiting() >= 2
+	}, 30*time.Second, 200*time.Microsecond, "expired waiter never enqueued")
 	time.Sleep(100 * time.Millisecond) // waiter 2 is now expired, still linked
 
 	held.Recycle()
