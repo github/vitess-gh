@@ -29,9 +29,11 @@ import (
 // lateExpiryCtx is valid at the moment its waiter enqueues and expires while
 // that waiter is parked on the waitlist. Its Done channel is never closed, so
 // the waiter does not remove itself on expiry. This deterministically produces
-// a waitlist containing already-expired waiters, which is the shape that arises
-// in production when clients time out faster than the pool hands out
-// connections.
+// a waitlist containing already-expired waiters.
+//
+// Scope: this pins the precondition -- an expired waiter still linked when a
+// returner examines it -- so that selection behaviour can be asserted without a
+// race. It is not evidence about how often real workloads reach that state.
 type lateExpiryCtx struct {
 	context.Context
 	deadline time.Time
@@ -59,9 +61,9 @@ func newLateExpiryCtx(deadline time.Time) *lateExpiryCtx {
 // to the pool is never handed to a waiter whose context has already expired,
 // including when expired waiters sit *behind* a live waiter in the list.
 //
-// Handing a connection to an expired waiter wastes it: the caller can no longer
-// use it and, in the transaction pool, the failed Begin closes the connection
-// and forces a fresh dial. Under load this starves the live waiters.
+// Handing a connection to an expired waiter wastes the handoff: the caller can
+// no longer use it, so the return makes no progress for anyone and the live
+// waiters keep waiting.
 func TestExpiredWaitersDoNotReceiveConnections(t *testing.T) {
 	var state TestState
 

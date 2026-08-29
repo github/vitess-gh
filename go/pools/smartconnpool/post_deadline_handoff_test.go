@@ -29,15 +29,20 @@ import (
 // expiredCtx becomes expired (Err() != nil) once its deadline passes, but its
 // Done() channel never fires.
 //
-// This deterministically pins the exact state that tryReturnConnSlow observes in
-// production: a waiter whose acquisition deadline has already passed but which is
-// still linked in the waitlist because its own goroutine has not yet executed, or
-// has not yet won, its self-removal under wl.mu.
+// This deterministically pins the pool-side state under test: a waiter whose
+// acquisition deadline has already passed but which is still linked in the
+// waitlist, because its own goroutine has not yet executed, or has not yet won,
+// its self-removal under wl.mu.
 //
 // Using a real context.WithTimeout would reach the same state only by winning a
 // race against the returner. Suppressing Done() removes the race without changing
 // anything the returner can observe: tryReturnConnSlow only ever reads
-// waiter.ctx, never waiter's Done channel.
+// waiter.ctx, never the waiter's Done channel.
+//
+// Scope: this proves what the pool does IF an expired waiter is still linked
+// when a returner examines it. It says nothing about how often real workloads
+// reach that state; TestExpiredWaiterEvictionIsRaceSafe exercises the same
+// invariant with real contexts and the real race.
 type expiredCtx struct{ deadline time.Time }
 
 func (c *expiredCtx) Deadline() (time.Time, bool) { return c.deadline, true }
@@ -54,7 +59,8 @@ func (c *expiredCtx) Err() error {
 // #20308 restores: the pool must never hand a connection to a waiter whose
 // acquisition context has already expired.
 //
-// On pristine v21 this test FAILS, reproducing the production signature:
+// Against the unfixed base this test FAILS, showing the observable shape of the
+// defect:
 //   - Get() returns success after its acquisition deadline
 //   - the success-only WaitTime/WaitCount metric therefore exceeds the deadline
 //   - and no connection is closed or re-dialled while it happens
@@ -123,7 +129,7 @@ func TestPostDeadlineHandoff(t *testing.T) {
 		t.Fatalf("POST-DEADLINE HANDOFF: pool delivered a connection to a waiter whose "+
 			"acquisition context expired %v earlier.\n"+
 			"  Get() returned SUCCESS after %v (acquisition deadline %v)\n"+
-			"  success-only metric mean wait = %v  > deadline %v  <-- production signature\n"+
+			"  success-only metric mean wait = %v  > deadline %v  <-- the defect\n"+
 			"  dials during handoff = %d (no redial)  closes = %d",
 			r.elapsed-acquireTimeout, r.elapsed, acquireTimeout,
 			mean, acquireTimeout,
@@ -140,8 +146,9 @@ func TestPostDeadlineHandoff(t *testing.T) {
 	require.Equal(t, waitsBefore, p.Metrics.WaitCount(),
 		"evicted expired waiter must not increment WaitCount (success-only metric)")
 
-	// (3) Either way, no connection is closed or re-dialled by this path. This is
-	// why the mechanism is invisible in MySQL's Connections counter.
+	// (4) Either way, no connection is closed or re-dialled by this path. The
+	// defect wastes a handoff; it does not churn connections, which is why it
+	// leaves no trace in MySQL's Connections counter.
 	require.Equal(t, dialsAfterWarmup, state.open.Load(), "no redial must occur")
 	require.Zero(t, state.close.Load(), "no connection close must occur")
 }
@@ -153,9 +160,12 @@ func TestPostDeadlineHandoff(t *testing.T) {
 // Setting matches the returned connection can be selected ahead of the live
 // waiter at the front of the list.
 //
-// Upstream #20308 scans the whole list rather than stopping at the first live
-// waiter. This test asserts that behaviour: the interior expired waiter must be
-// evicted, and the live waiter must receive the connection.
+// The selection loop does not stop at the first live waiter: it records that
+// waiter as a fallback target and keeps going until it finds a better match
+// (`age > maxAge || setting == connSetting`) or reaches the end. Every waiter it
+// examines on the way is checked for expiry. This test asserts that behaviour:
+// the interior expired waiter must be evicted, and the live waiter must receive
+// the connection.
 func TestInteriorExpiredWaiterNotServed(t *testing.T) {
 	settingA := NewSetting("set workload='olap'", "set workload='oltp'")
 

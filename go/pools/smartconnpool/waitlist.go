@@ -93,6 +93,15 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	case <-ctx.Done():
 		// Context expired. We need to try to remove ourselves from the waitlist to
 		// prevent another goroutine from trying to hand us a connection later on.
+		//
+		// This removal MUST stay O(1). The code this replaces scanned the list
+		// to locate elem before removing it, which is O(n) while holding wl.mu,
+		// the mutex that serializes every acquisition and return in the pool.
+		// Every waiter that times out pays that cost, so a timeout storm at
+		// depth n serializes O(n^2) work on the hot path. RemoveIfPresent is a
+		// required part of this backport, not incidental cleanup: do not
+		// reintroduce the scan.
+		//
 		// If we lose the race against tryReturnConnSlow, it owns the element and
 		// will notify our semaphore.
 		wl.mu.Lock()
@@ -126,11 +135,11 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
 
-	// iterate the waitlist looking for waiters that are still live and have not
-	// been skipped over yet. Waiters whose context has already expired are not
-	// counted: opening a new connection on their behalf would be wasted work.
+	// count the waiters that no returner has aged yet; they may be starving.
+	// Waiters whose context has already expired cannot use a connection and are
+	// only listed until a returner evicts them, so they don't count.
 	for e := wl.list.Front(); e != nil; e = e.Next() {
-		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+		if e.Value.ctx.Err() != nil {
 			continue
 		}
 		if e.Value.age == 0 {
@@ -142,6 +151,11 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 }
 
 // tryReturnConn tries handing over a connection to one of the waiters in the pool.
+//
+// Waiters whose context has already expired when they are examined are evicted
+// rather than selected. A waiter that is still live when examined but expires
+// before it is notified will still receive the connection; that narrow race is
+// unchanged by this fix and is not something the pool can close from here.
 func (wl *waitlist[D]) tryReturnConn(conn *Pooled[D]) bool {
 	// fast path: if there's nobody waiting there's nothing to do
 	if wl.list.Len() == 0 {
@@ -165,14 +179,14 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// capture the successor before a possible Remove unlinks e
 		next = e.Next()
 
-		// Never hand a connection over to a waiter whose context has already
-		// expired: that waiter can no longer use it, and for the transaction
-		// pool the subsequent failed Begin closes the connection and forces a
-		// fresh dial. Evict the expired waiter instead so the connection stays
-		// available for a waiter that can still use it. Expired waiters can sit
-		// anywhere in the list, not just at the front, because deadlines are
-		// heterogeneous, so the whole scan has to check.
-		if e.Value.ctx != nil && e.Value.ctx.Err() != nil {
+		// Never hand a connection to a waiter whose context has already
+		// expired: that waiter cannot use it, so the handoff would consume a
+		// return without making progress for anyone. Evicting it instead also
+		// stops the list accumulating a dead prefix that every later return
+		// has to walk. Deadlines are heterogeneous, so expired waiters sit
+		// anywhere in the list, not only at the front; every waiter examined
+		// before a target is selected is therefore checked for expiry.
+		if e.Value.ctx.Err() != nil {
 			wl.list.Remove(e)
 			expired = append(expired, e)
 			continue
@@ -199,10 +213,15 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	wl.mu.Unlock()
 
 	// Wake the evicted waiters. Their conn stays nil, which waitForConn hands
-	// back to the caller and which Get maps to a timeout. This is safe to do
-	// after releasing the lock: an evicted waiter is blocked on its semaphore
-	// and cannot return (nor recycle its list element) until we notify it, and
-	// because we removed it from the list under the lock nobody else can.
+	// back to the caller and which Get maps to a timeout.
+	//
+	// This is deliberately outside the lock. It is safe because an evicted
+	// waiter is blocked on its semaphore and cannot return (nor recycle its
+	// list element) until we notify it, and because we removed it from the list
+	// under the lock nobody else can. Keeping the wakeups out of the critical
+	// section matters: under mass expiry this loop can be long, and wl.mu
+	// serializes every acquisition and return in the pool. `expired` is nil,
+	// and allocates nothing, whenever no waiter has expired.
 	for _, e := range expired {
 		e.Value.sema.notify(false)
 	}
