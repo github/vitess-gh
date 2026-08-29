@@ -61,9 +61,9 @@ func newLateExpiryCtx(deadline time.Time) *lateExpiryCtx {
 // to the pool is never handed to a waiter whose context has already expired,
 // including when expired waiters sit *behind* a live waiter in the list.
 //
-// Handing a connection to an expired waiter wastes the handoff: the caller can
-// no longer use it, so the return makes no progress for anyone and the live
-// waiters keep waiting.
+// Serving an expired waiter wastes the handoff: its acquisition has already
+// expired, so it is no longer eligible for a successful acquisition, and the
+// return makes no progress for the live waiters that are still waiting.
 func TestExpiredWaitersDoNotReceiveConnections(t *testing.T) {
 	var state TestState
 
@@ -134,7 +134,7 @@ func TestExpiredWaitersDoNotReceiveConnections(t *testing.T) {
 	for i, r := range results {
 		if r.expired {
 			require.Falsef(t, r.gotConn,
-				"expired waiter %d received a connection; it can never use it", i)
+				"expired waiter %d received a connection; its acquisition had already expired", i)
 		} else {
 			require.Truef(t, r.gotConn,
 				"live waiter %d was starved of a connection", i)

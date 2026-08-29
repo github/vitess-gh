@@ -121,7 +121,7 @@ func TestEvictionPreservesConnectionLifecycle(t *testing.T) {
 	for i, r := range results {
 		if r.expired {
 			require.Falsef(t, r.gotConn,
-				"expired waiter %d received a connection; it can never use it", i)
+				"expired waiter %d received a connection; its acquisition had already expired", i)
 			continue
 		}
 		require.Truef(t, r.gotConn, "live waiter %d was starved of a connection", i)

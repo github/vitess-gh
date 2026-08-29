@@ -136,8 +136,9 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 	defer wl.mu.Unlock()
 
 	// count the waiters that no returner has aged yet; they may be starving.
-	// Waiters whose context has already expired cannot use a connection and are
-	// only listed until a returner evicts them, so they don't count.
+	// Waiters whose acquisition context has already expired are no longer
+	// eligible for a successful acquisition and are only listed until a
+	// returner evicts them, so they don't count.
 	for e := wl.list.Front(); e != nil; e = e.Next() {
 		if e.Value.ctx.Err() != nil {
 			continue
@@ -179,9 +180,11 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// capture the successor before a possible Remove unlinks e
 		next = e.Next()
 
-		// Never hand a connection to a waiter whose context has already
-		// expired: that waiter cannot use it, so the handoff would consume a
-		// return without making progress for anyone. Evicting it instead also
+		// Never hand a connection to a waiter whose acquisition context has
+		// already expired: it is no longer eligible to receive a successful
+		// acquisition, so serving it would violate the acquisition deadline
+		// and consume a return that a live waiter is still waiting for.
+		// Evicting it instead also
 		// stops the list accumulating a dead prefix that every later return
 		// has to walk. Deadlines are heterogeneous, so expired waiters sit
 		// anywhere in the list, not only at the front; every waiter examined
