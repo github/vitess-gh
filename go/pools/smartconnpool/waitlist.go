@@ -184,11 +184,11 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// already expired: it is no longer eligible to receive a successful
 		// acquisition, so serving it would violate the acquisition deadline
 		// and consume a return that a live waiter is still waiting for.
-		// Evicting it instead also
-		// stops the list accumulating a dead prefix that every later return
-		// has to walk. Deadlines are heterogeneous, so expired waiters sit
-		// anywhere in the list, not only at the front; every waiter examined
-		// before a target is selected is therefore checked for expiry.
+		// Evicting it instead also stops the list accumulating a dead prefix
+		// that every later return has to walk. Deadlines are heterogeneous, so
+		// expired waiters sit anywhere in the list, not only at the front;
+		// every waiter examined before a target is selected is therefore
+		// checked for expiry.
 		if e.Value.ctx.Err() != nil {
 			wl.list.Remove(e)
 			expired = append(expired, e)
