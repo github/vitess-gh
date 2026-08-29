@@ -91,30 +91,14 @@ jobs:
           source build.env
           go run test.go -docker=false -skip-build -print-log -follow -timeout=60m vtop_example
 
-      - name: Cluster diagnostics on failure
+      # Failure-only. Outside vitessio/vitess the runner is selected by
+      # vars.VTOP_RUNNER (see runs-on above); an undersized runner shows up here
+      # as "FailedScheduling ... Insufficient cpu" instead of an opaque timeout.
+      - name: Cluster capacity on failure
         if: failure() && steps.changes.outputs.end_to_end == 'true'
         run: |
           set +e
-          echo "::group::host capacity"
-          nproc; free -m; df -h /
-          echo "::endgroup::"
-          echo "::group::kubectl get nodes -o wide"
-          kubectl get nodes -o wide
-          echo "::endgroup::"
-          echo "::group::kubectl describe node"
-          kubectl describe node
-          echo "::endgroup::"
-          echo "::group::kubectl get pods -A -o wide"
-          kubectl get pods -A -o wide
-          echo "::endgroup::"
-          echo "::group::kubectl get events -A --sort-by=.lastTimestamp"
-          kubectl get events -A --sort-by=.lastTimestamp
-          echo "::endgroup::"
-          echo "::group::pending pod details"
-          kubectl get pods -A --field-selector=status.phase=Pending -o name | while read -r p; do
-            kubectl describe -n example "${p#pod/}" 2>/dev/null || kubectl describe -A "$p"
-          done
-          echo "::endgroup::"
-          echo "::group::kubectl get pvc,pv -A"
-          kubectl get pvc -A; kubectl get pv
-          echo "::endgroup::"
+          echo "host: $(nproc) cpu, $(free -m | awk '/^Mem:/{print $2}') MB"
+          kubectl describe node | sed -n '/^Allocatable:/,/^System Info:/p;/^Allocated resources:/,/^Events:/p'
+          kubectl get pods -A --field-selector=status.phase!=Running
+          kubectl get events -A --field-selector reason=FailedScheduling --sort-by=.lastTimestamp | tail -20
