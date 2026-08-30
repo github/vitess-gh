@@ -135,9 +135,14 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
 
-	// iterate the waitlist looking for waiters with an expired Context,
-	// or remove everything if force is true
+	// count the waiters that no returner has aged yet; they may be starving.
+	// Waiters whose acquisition context has already expired are no longer
+	// eligible for a successful acquisition and are only listed until a
+	// returner evicts them, so they don't count.
 	for e := wl.list.Front(); e != nil; e = e.Next() {
+		if e.Value.ctx.Err() != nil {
+			continue
+		}
 		if e.Value.age == 0 {
 			maybeStarving++
 		}
@@ -147,6 +152,11 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 }
 
 // tryReturnConn tries handing over a connection to one of the waiters in the pool.
+//
+// Waiters whose context has already expired when they are examined are evicted
+// rather than selected. A waiter that is still live when examined but expires
+// before it is notified will still receive the connection; that narrow race is
+// unchanged by this fix and is not something the pool can close from here.
 func (wl *waitlist[D]) tryReturnConn(conn *Pooled[D]) bool {
 	// fast path: if there's nobody waiting there's nothing to do
 	if wl.list.Len() == 0 {
@@ -160,15 +170,35 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	const maxAge = 8
 	var (
 		target      *list.Element[waiter[D]]
+		expired     []*list.Element[waiter[D]]
 		connSetting = conn.Conn.Setting()
 	)
 
 	wl.mu.Lock()
-	target = wl.list.Front()
-	// iterate through the waitlist looking for either waiters that have been
-	// here too long, or a waiter that is looking exactly for the same Setting
-	// as the one we have in our connection.
-	for e := target; e != nil; e = e.Next() {
+	var next *list.Element[waiter[D]]
+	for e := wl.list.Front(); e != nil; e = next {
+		// capture the successor before a possible Remove unlinks e
+		next = e.Next()
+
+		// Never hand a connection to a waiter whose acquisition context has
+		// already expired: it is no longer eligible to receive a successful
+		// acquisition, so serving it would violate the acquisition deadline
+		// and consume a return that a live waiter is still waiting for.
+		// Evicting it instead also stops the list accumulating a dead prefix
+		// that every later return has to walk. Deadlines are heterogeneous, so
+		// expired waiters sit anywhere in the list, not only at the front;
+		// every waiter examined before a target is selected is therefore
+		// checked for expiry.
+		if e.Value.ctx.Err() != nil {
+			wl.list.Remove(e)
+			expired = append(expired, e)
+			continue
+		}
+
+		if target == nil {
+			// front-most live waiter, used unless a better match is found below
+			target = e
+		}
 		if e.Value.age > maxAge || e.Value.setting == connSetting {
 			target = e
 			break
@@ -185,18 +215,36 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	}
 	wl.mu.Unlock()
 
-	// maybe there isn't anybody to hand over the connection to, because we've
-	// raced with another client returning another connection
-	if target == nil {
-		return false
+	// Hand the connection over before waking the evicted waiters. The target is
+	// the only party here with a deadline left to make; the evicted waiters are
+	// all going to return a timeout, so their wakeups must not queue in front of
+	// the handoff. Under mass expiry that ordering is the difference between the
+	// target being notified immediately and being notified after N semaphore
+	// releases, which would widen the window in which it expires post-selection.
+	if target != nil {
+		// write the connection into the waiter and signal their semaphore. they'll
+		// wake up to pick up the connection.
+		target.Value.conn = conn
+		target.Value.sema.notify(true)
 	}
 
-	// if we have a target to return the connection to, simply write the connection
-	// into the waiter and signal their semaphore. they'll wake up to pick up the
-	// connection.
-	target.Value.conn = conn
-	target.Value.sema.notify(true)
-	return true
+	// Wake the evicted waiters. Their conn stays nil, which waitForConn hands
+	// back to the caller and which Get maps to a timeout.
+	//
+	// This is deliberately outside the lock. It is safe because an evicted
+	// waiter is blocked on its semaphore and cannot return (nor recycle its
+	// list element) until we notify it, and because we removed it from the list
+	// under the lock nobody else can. Keeping the wakeups out of the critical
+	// section matters: under mass expiry this loop can be long, and wl.mu
+	// serializes every acquisition and return in the pool. `expired` is nil,
+	// and allocates nothing, whenever no waiter has expired.
+	for _, e := range expired {
+		e.Value.sema.notify(false)
+	}
+
+	// target is nil when there was nobody to hand the connection to, because
+	// every waiter had expired or we raced with another returner.
+	return target != nil
 }
 
 func (wl *waitlist[C]) init() {
