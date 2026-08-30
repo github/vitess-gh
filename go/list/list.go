@@ -142,6 +142,22 @@ func (l *List[T]) Remove(e *Element[T]) {
 	l.remove(e)
 }
 
+// RemoveIfPresent removes e from l if e is currently an element of l, and
+// reports whether it was removed. Unlike Remove, it does not panic when e does
+// not belong to l; it saves the caller a membership scan, nothing more.
+//
+// It performs no synchronisation of its own. e.list and the link fields touched
+// by remove are ordinary fields, so callers must still serialise every mutation
+// of l externally, as waitlist does with its mutex. Under that lock the return
+// value tells two contenders which of them owns e.
+func (l *List[T]) RemoveIfPresent(e *Element[T]) bool {
+	if e.list != l {
+		return false
+	}
+	l.remove(e)
+	return true
+}
+
 // PushFront inserts a new element e with value v at the front of list l and returns e.
 func (l *List[T]) PushFront(v T) *Element[T] {
 	return l.insertValue(v, &l.root)

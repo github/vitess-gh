@@ -70,17 +70,10 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	select {
 	case <-closeChan:
 		// Pool was closed while we were waiting.
-		removed := false
-
+		// Try to remove ourselves from the list. If we lose the race against
+		// tryReturnConnSlow, it owns the element and will notify our semaphore.
 		wl.mu.Lock()
-		// Try to find and remove ourselves from the list.
-		for e := wl.list.Front(); e != nil; e = e.Next() {
-			if e == elem {
-				wl.list.Remove(elem)
-				removed = true
-				break
-			}
-		}
+		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
 		// If we removed ourselves from the waitlist, we need to notify our semaphore
@@ -100,17 +93,19 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	case <-ctx.Done():
 		// Context expired. We need to try to remove ourselves from the waitlist to
 		// prevent another goroutine from trying to hand us a connection later on.
-		removed := false
-
+		//
+		// This removal MUST stay O(1). The code this replaces scanned the list
+		// to locate elem before removing it, which is O(n) while holding wl.mu,
+		// the mutex that serializes every acquisition and return in the pool.
+		// Every waiter that times out pays that cost, so a timeout storm at
+		// depth n serializes O(n^2) work on the hot path. RemoveIfPresent is a
+		// required part of this backport, not incidental cleanup: do not
+		// reintroduce the scan.
+		//
+		// If we lose the race against tryReturnConnSlow, it owns the element and
+		// will notify our semaphore.
 		wl.mu.Lock()
-		// Try to find and remove ourselves from the list.
-		for e := wl.list.Front(); e != nil; e = e.Next() {
-			if e == elem {
-				wl.list.Remove(elem)
-				removed = true
-				break
-			}
-		}
+		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
 		// If we removed ourselves from the waitlist, we need to notify our semaphore

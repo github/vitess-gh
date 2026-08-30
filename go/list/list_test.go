@@ -133,3 +133,30 @@ func TestPushFrontValue(t *testing.T) {
 	assert.Equal(t, a, l.Front())
 	assert.Equal(t, a, e.prev)
 }
+func TestRemoveIfPresentOwnership(t *testing.T) {
+	l := New[int]()
+	e := l.PushBack(1)
+
+	// present: removed, and the caller owns it
+	assert.True(t, l.RemoveIfPresent(e))
+	assert.Equal(t, 0, l.Len())
+
+	// already removed: must report false rather than panic or double-remove
+	assert.False(t, l.RemoveIfPresent(e))
+	assert.Equal(t, 0, l.Len())
+
+	// belongs to a different list: must not be removed from either
+	other := New[int]()
+	oe := other.PushBack(2)
+	assert.False(t, l.RemoveIfPresent(oe))
+	assert.Equal(t, 1, other.Len())
+	assert.Equal(t, 0, l.Len())
+
+	// removing one element must leave its neighbours linked
+	l2 := New[int]()
+	a, b, c := l2.PushBack(1), l2.PushBack(2), l2.PushBack(3)
+	assert.True(t, l2.RemoveIfPresent(b))
+	assert.Equal(t, 2, l2.Len())
+	assert.Equal(t, c, a.Next())
+	assert.False(t, l2.RemoveIfPresent(b))
+}
