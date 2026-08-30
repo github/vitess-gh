@@ -19,6 +19,8 @@ package smartconnpool
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"vitess.io/vitess/go/list"
 )
@@ -35,6 +37,11 @@ type waiter[C Connection] struct {
 	// sema is a synchronization primitive that allows us to block until our request
 	// has been fulfilled
 	sema semaphore
+	// notifiedAt is the monotonic nanosecond timestamp at which a returner
+	// released our semaphore, or 0 if nobody has. It is written by the returner
+	// before notify and read by us after we resume, which the semaphore
+	// happens-before edge orders; it measures handoff transit only.
+	notifiedAt int64
 	// age is the amount of cycles this client has been on the waitlist
 	age uint32
 }
@@ -43,6 +50,9 @@ type waitlist[C Connection] struct {
 	nodes sync.Pool
 	mu    sync.Mutex
 	list  list.List[waiter[C]]
+	// stages accounts for the work done under mu and for the handoff transit.
+	// It points at the owning pool's StageMetrics and is never nil after init.
+	stages *StageMetrics
 }
 
 // waitForConn blocks until a connection with the given Setting is returned by another client,
@@ -60,6 +70,17 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 	wl.list.PushBackValue(elem)
 	wl.mu.Unlock()
 
+	wl.stages.enqueueWaiter()
+	defer func() {
+		wl.stages.dequeueWaiter()
+		// Handoff transit: from the returner releasing our semaphore to us
+		// running again. It contains no pool work, only wakeup and scheduler
+		// latency, so it isolates transit from everything else.
+		if at := atomic.LoadInt64(&elem.Value.notifiedAt); at != 0 {
+			wl.stages.recordNotifyToResume(time.Duration(int64(monotonicNow()) - at))
+		}
+	}()
+
 	done := make(chan struct{})
 	go func() {
 		// Block on our waiter's semaphore until somebody can hand over a connection to us.
@@ -73,6 +94,9 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 		// Try to remove ourselves from the list. If we lose the race against
 		// tryReturnConnSlow, it owns the element and will notify our semaphore.
 		wl.mu.Lock()
+		wl.stages.wlSelfRemovalOps.Add(1)
+		wl.stages.wlLenAtOpSum.Add(int64(wl.list.Len()))
+		wl.stages.wlElementsExamined.Add(1)
 		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
@@ -105,6 +129,9 @@ func (wl *waitlist[C]) waitForConn(ctx context.Context, setting *Setting, closeC
 		// If we lose the race against tryReturnConnSlow, it owns the element and
 		// will notify our semaphore.
 		wl.mu.Lock()
+		wl.stages.wlSelfRemovalOps.Add(1)
+		wl.stages.wlLenAtOpSum.Add(int64(wl.list.Len()))
+		wl.stages.wlElementsExamined.Add(1)
 		removed := wl.list.RemoveIfPresent(elem)
 		wl.mu.Unlock()
 
@@ -134,6 +161,10 @@ func (wl *waitlist[C]) maybeStarvingCount() (maybeStarving int) {
 
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
+
+	wl.stages.wlStarvationScanOps.Add(1)
+	wl.stages.wlLenAtOpSum.Add(int64(wl.list.Len()))
+	wl.stages.wlElementsExamined.Add(int64(wl.list.Len()))
 
 	// count the waiters that no returner has aged yet; they may be starving.
 	// Waiters whose acquisition context has already expired are no longer
@@ -174,11 +205,24 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		connSetting = conn.Conn.Setting()
 	)
 
+	// Sampled, because two clock reads inside the mutex that serializes the
+	// whole pool are affordable occasionally and not affordable per return.
+	timed := wl.stages.sampleWlHold()
+	var heldFrom int64
+
 	wl.mu.Lock()
+	if timed {
+		heldFrom = int64(monotonicNow())
+	}
+	wl.stages.wlReturnSelectionOps.Add(1)
+	wl.stages.wlLenAtOpSum.Add(int64(wl.list.Len()))
+
+	var examined int64
 	var next *list.Element[waiter[D]]
 	for e := wl.list.Front(); e != nil; e = next {
 		// capture the successor before a possible Remove unlinks e
 		next = e.Next()
+		examined++
 
 		// Never hand a connection to a waiter whose acquisition context has
 		// already expired: it is no longer eligible to receive a successful
@@ -192,6 +236,7 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		if e.Value.ctx.Err() != nil {
 			wl.list.Remove(e)
 			expired = append(expired, e)
+			wl.stages.expiredEvicted.Add(1)
 			continue
 		}
 
@@ -213,6 +258,10 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	if target != nil {
 		wl.list.Remove(target)
 	}
+	wl.stages.wlElementsExamined.Add(examined)
+	if timed {
+		wl.stages.recordWlHold(time.Duration(int64(monotonicNow()) - heldFrom))
+	}
 	wl.mu.Unlock()
 
 	// Hand the connection over before waking the evicted waiters. The target is
@@ -225,6 +274,7 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 		// write the connection into the waiter and signal their semaphore. they'll
 		// wake up to pick up the connection.
 		target.Value.conn = conn
+		atomic.StoreInt64(&target.Value.notifiedAt, int64(monotonicNow()))
 		target.Value.sema.notify(true)
 	}
 
@@ -239,6 +289,7 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	// serializes every acquisition and return in the pool. `expired` is nil,
 	// and allocates nothing, whenever no waiter has expired.
 	for _, e := range expired {
+		atomic.StoreInt64(&e.Value.notifiedAt, int64(monotonicNow()))
 		e.Value.sema.notify(false)
 	}
 
@@ -247,7 +298,8 @@ func (wl *waitlist[D]) tryReturnConnSlow(conn *Pooled[D]) bool {
 	return target != nil
 }
 
-func (wl *waitlist[C]) init() {
+func (wl *waitlist[C]) init(stages *StageMetrics) {
+	wl.stages = stages
 	wl.nodes.New = func() any {
 		return &list.Element[waiter[C]]{}
 	}

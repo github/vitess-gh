@@ -28,7 +28,7 @@ import (
 
 func TestWaitlistPoolCloseWithMultipleWaiters(t *testing.T) {
 	wait := waitlist[*TestConn]{}
-	wait.init()
+	wait.init(&StageMetrics{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()

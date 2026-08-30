@@ -304,7 +304,7 @@ func runLiveSelection(t *testing.T, settings []*Setting, ages []uint32, connSett
 	t.Helper()
 
 	var wl waitlist[*TestConn]
-	wl.init()
+	wl.init(&StageMetrics{})
 
 	elems := make([]*list.Element[waiter[*TestConn]], len(settings))
 	for i := range settings {

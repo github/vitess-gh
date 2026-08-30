@@ -147,6 +147,7 @@ type ConnPool[C Connection] struct {
 	}
 
 	Metrics Metrics
+	Stages  *StageMetrics
 	Name    string
 }
 
@@ -154,12 +155,18 @@ type ConnPool[C Connection] struct {
 // The pool must be ConnPool.Open before it can start giving out connections
 func NewPool[C Connection](config *Config[C]) *ConnPool[C] {
 	pool := &ConnPool[C]{}
+	// Allocated separately rather than embedded by value. The connection
+	// stacks at the head of ConnPool are read with a 128-bit atomic that
+	// requires 16-byte alignment, which Go does not guarantee for the struct
+	// and which in practice follows from ConnPool's size class; growing the
+	// struct by a large value field can silently break it.
+	pool.Stages = &StageMetrics{}
 	pool.config.maxCapacity = config.Capacity
 	pool.config.maxLifetime.Store(config.MaxLifetime.Nanoseconds())
 	pool.config.idleTimeout.Store(config.IdleTimeout.Nanoseconds())
 	pool.config.refreshInterval.Store(config.RefreshInterval.Nanoseconds())
 	pool.config.logWait = config.LogWait
-	pool.wait.init()
+	pool.wait.init(pool.Stages)
 
 	return pool
 }
@@ -351,6 +358,44 @@ func (pool *ConnPool[C]) SetIdleTimeout(duration time.Duration) {
 
 func (pool *ConnPool[D]) RefreshInterval() time.Duration {
 	return time.Duration(pool.config.refreshInterval.Load())
+}
+
+// recordFailedAcquire accounts for an acquisition that blocked and then failed.
+// These never reach recordWait, so without this they are absent from every wait
+// statistic the pool exports: the mean wait is computed over survivors only,
+// which understates it exactly when waits are worst.
+func (pool *ConnPool[C]) recordFailedAcquire(ctx context.Context, start time.Time, err error) {
+	pool.Stages.recordFailedWait(time.Since(start))
+	switch {
+	case err == ErrConnPoolClosed:
+		pool.Stages.acquirePoolClosed.Add(1)
+	case ctx.Err() == context.DeadlineExceeded:
+		pool.Stages.acquireTimedOut.Add(1)
+	case ctx.Err() != nil:
+		pool.Stages.acquireCancelled.Add(1)
+	default:
+		// evicted, or the pool handed back no connection: from the caller's
+		// point of view the acquisition timed out.
+		pool.Stages.acquireTimedOut.Add(1)
+	}
+}
+
+// recordWaitToBorrow closes the window between an acquisition being counted as
+// a successful wait and it being counted in InUse. Only acquisitions that
+// actually blocked are measured; the non-blocking fast paths never open it.
+func (pool *ConnPool[C]) recordWaitToBorrow(waited bool, waitedAt time.Duration) {
+	if waited {
+		pool.Stages.recordWaitToBorrow(monotonicNow() - waitedAt)
+	}
+}
+
+// recordWaitSuccessNotBorrowed counts an acquisition that recorded a successful
+// wait and then failed before reaching borrowed++. It is the only way, other
+// than short hold times, for WaitCount and InUse to disagree.
+func (pool *ConnPool[C]) recordWaitSuccessNotBorrowed(waited bool) {
+	if waited {
+		pool.Stages.waitSuccessNotBorrowed.Add(1)
+	}
 }
 
 func (pool *ConnPool[C]) recordWait(start time.Time) {
@@ -545,6 +590,12 @@ func (pool *ConnPool[C]) getNew(ctx context.Context) (*Pooled[C], error) {
 func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 	pool.Metrics.getCount.Add(1)
 
+	// waitedAt marks the instant this acquisition was counted as a successful
+	// wait. Everything between there and borrowed++ is time in which the
+	// acquisition is in WaitCount but not yet in InUse.
+	var waited bool
+	var waitedAt time.Duration
+
 	// best case: if there's a connection in the clean stack, return it right away
 	if conn := pool.pop(&pool.clean); conn != nil {
 		pool.borrowed.Add(1)
@@ -570,11 +621,16 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 			return nil, ErrConnPoolClosed
 		}
 
+		pool.Stages.acquireWaited.Add(1)
 		conn, err = pool.wait.waitForConn(ctx, nil, *closeChan)
 		if err != nil || conn == nil {
+			pool.recordFailedAcquire(ctx, start, err)
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
+		pool.Stages.acquireSuccess.Add(1)
+		waited = true
+		waitedAt = monotonicNow()
 	}
 	// no connections available and no connections to wait for (pool is closed)
 	if conn == nil {
@@ -585,24 +641,33 @@ func (pool *ConnPool[C]) get(ctx context.Context) (*Pooled[C], error) {
 	if conn.Conn.Setting() != nil {
 		pool.Metrics.resetSetting.Add(1)
 
+		resetAt := monotonicNow()
 		err = conn.Conn.ResetSetting(ctx)
+		pool.Stages.settingResetTime.Add(int64(monotonicNow() - resetAt))
+		pool.Stages.settingResetCount.Add(1)
 		if err != nil {
+			pool.Stages.settingResetFailed.Add(1)
 			conn.Close()
 			err = pool.connReopen(ctx, conn, monotonicNow())
 			if err != nil {
 				pool.closedConn()
+				pool.recordWaitSuccessNotBorrowed(waited)
 				return nil, err
 			}
 		}
 	}
 
 	pool.borrowed.Add(1)
+	pool.recordWaitToBorrow(waited, waitedAt)
 	return conn, nil
 }
 
 // getWithSetting returns a connection from the pool with the given Setting applied
 func (pool *ConnPool[C]) getWithSetting(ctx context.Context, setting *Setting) (*Pooled[C], error) {
 	pool.Metrics.getWithSettingsCount.Add(1)
+
+	var waited bool
+	var waitedAt time.Duration
 
 	var err error
 	// best case: check if there's a connection in the setting stack where our Setting belongs
@@ -633,11 +698,16 @@ func (pool *ConnPool[C]) getWithSetting(ctx context.Context, setting *Setting) (
 			return nil, ErrConnPoolClosed
 		}
 
+		pool.Stages.acquireWaited.Add(1)
 		conn, err = pool.wait.waitForConn(ctx, setting, *closeChan)
 		if err != nil || conn == nil {
+			pool.recordFailedAcquire(ctx, start, err)
 			return nil, ErrTimeout
 		}
 		pool.recordWait(start)
+		pool.Stages.acquireSuccess.Add(1)
+		waited = true
+		waitedAt = monotonicNow()
 	}
 	// no connections available and no connections to wait for (pool is closed)
 	if conn == nil {
@@ -651,26 +721,37 @@ func (pool *ConnPool[C]) getWithSetting(ctx context.Context, setting *Setting) (
 		if connSetting != nil {
 			pool.Metrics.diffSetting.Add(1)
 
+			resetAt := monotonicNow()
 			err = conn.Conn.ResetSetting(ctx)
+			pool.Stages.settingResetTime.Add(int64(monotonicNow() - resetAt))
+			pool.Stages.settingResetCount.Add(1)
 			if err != nil {
+				pool.Stages.settingResetFailed.Add(1)
 				conn.Close()
 				err = pool.connReopen(ctx, conn, monotonicNow())
 				if err != nil {
 					pool.closedConn()
+					pool.recordWaitSuccessNotBorrowed(waited)
 					return nil, err
 				}
 			}
 		}
 		// apply our setting now; if we can't we assume that the conn is broken
 		// and close it without returning to the pool
-		if err := conn.Conn.ApplySetting(ctx, setting); err != nil {
+		applyAt := monotonicNow()
+		err := conn.Conn.ApplySetting(ctx, setting)
+		pool.Stages.settingApplyTime.Add(int64(monotonicNow() - applyAt))
+		pool.Stages.settingApplyCount.Add(1)
+		if err != nil {
 			conn.Close()
 			pool.closedConn()
+			pool.recordWaitSuccessNotBorrowed(waited)
 			return nil, err
 		}
 	}
 
 	pool.borrowed.Add(1)
+	pool.recordWaitToBorrow(waited, waitedAt)
 	return conn, nil
 }
 
@@ -857,6 +938,96 @@ func (pool *ConnPool[C]) RegisterStats(stats *servenv.Exporter, name string) {
 	stats.NewCounterDurationFunc(name+"WaitTime", "Tablet server wait time", func() time.Duration {
 		return pool.Metrics.WaitTime()
 	})
+
+	// Stage-aware acquisition metrics. WaitCount/WaitTime above are recorded
+	// only on the success path and so describe a censored population; the
+	// counters below expose the acquisitions that blocked and then failed, and
+	// decompose a blocking acquisition into the stages it passes through.
+	stats.NewGaugeFunc(name+"WaitersCurrent", "Callers currently blocked acquiring a connection, including any already selected but not yet resumed", func() int64 {
+		return pool.Stages.WaitersCurrent()
+	})
+	stats.NewGaugeFunc(name+"WaitersListed", "Callers currently on the waitlist; WaitersCurrent minus this is the population selected but not yet resumed", func() int64 {
+		return int64(pool.wait.waiting())
+	})
+	stats.NewCounterFunc(name+"WaitersPeak", "High-water mark of WaitersCurrent", func() int64 {
+		return pool.Stages.WaitersPeak()
+	})
+	stats.NewCounterFunc(name+"AcquireWaited", "Acquisitions that had to block, successful or not", func() int64 {
+		return pool.Stages.AcquireWaited()
+	})
+	stats.NewCounterFunc(name+"AcquireSuccess", "Blocking acquisitions that received a connection", func() int64 {
+		return pool.Stages.AcquireSuccess()
+	})
+	stats.NewCounterFunc(name+"AcquireTimedOut", "Blocking acquisitions that timed out", func() int64 {
+		return pool.Stages.AcquireTimedOut()
+	})
+	stats.NewCounterFunc(name+"AcquireCancelled", "Blocking acquisitions cancelled by the caller", func() int64 {
+		return pool.Stages.AcquireCancelled()
+	})
+	stats.NewCounterFunc(name+"AcquirePoolClosed", "Blocking acquisitions that failed because the pool closed", func() int64 {
+		return pool.Stages.AcquirePoolClosed()
+	})
+	stats.NewCounterDurationFunc(name+"FailedWaitTime", "Time spent waiting by acquisitions that then failed; the uncensored counterpart of WaitTime", func() time.Duration {
+		return pool.Stages.FailedWaitTime()
+	})
+	stats.NewCounterFunc(name+"FailedWaitCount", "Acquisitions that blocked and then failed", func() int64 {
+		return pool.Stages.FailedWaitCount()
+	})
+	stats.NewCounterDurationFunc(name+"NotifyToResumeTime", "Cumulative handoff transit: semaphore release to waiter resumed", func() time.Duration {
+		return pool.Stages.NotifyToResumeTime()
+	})
+	stats.NewCounterFunc(name+"NotifyToResumeCount", "Handoff transits measured", func() int64 {
+		return pool.Stages.NotifyToResumeCount()
+	})
+	stats.NewCounterDurationFunc(name+"WaitToBorrowTime", "Cumulative time between an acquisition being counted in WaitCount and being counted in InUse", func() time.Duration {
+		return pool.Stages.WaitToBorrowTime()
+	})
+	stats.NewCounterFunc(name+"WaitToBorrowCount", "Acquisitions measured between WaitCount and InUse", func() int64 {
+		return pool.Stages.WaitToBorrowCount()
+	})
+	stats.NewCounterFunc(name+"WaitSuccessNotBorrowed", "Acquisitions that recorded a successful wait and then failed before being counted in InUse", func() int64 {
+		return pool.Stages.WaitSuccessNotBorrowed()
+	})
+	stats.NewCounterDurationFunc(name+"SettingResetTime", "Cumulative time in ResetSetting round trips", func() time.Duration {
+		return pool.Stages.SettingResetTime()
+	})
+	stats.NewCounterFunc(name+"SettingResetCount", "ResetSetting round trips", func() int64 {
+		return pool.Stages.SettingResetCount()
+	})
+	stats.NewCounterFunc(name+"SettingResetFailed", "ResetSetting round trips that failed and forced a reopen", func() int64 {
+		return pool.Stages.SettingResetFailed()
+	})
+	stats.NewCounterDurationFunc(name+"SettingApplyTime", "Cumulative time in ApplySetting round trips", func() time.Duration {
+		return pool.Stages.SettingApplyTime()
+	})
+	stats.NewCounterFunc(name+"SettingApplyCount", "ApplySetting round trips", func() int64 {
+		return pool.Stages.SettingApplyCount()
+	})
+	stats.NewCounterFunc(name+"WaitlistSelfRemovalOps", "Waitlist operations by a waiter removing itself on cancellation", func() int64 {
+		return pool.Stages.WlSelfRemovalOps()
+	})
+	stats.NewCounterFunc(name+"WaitlistReturnSelectionOps", "Waitlist operations by a returner selecting a waiter", func() int64 {
+		return pool.Stages.WlReturnSelectionOps()
+	})
+	stats.NewCounterFunc(name+"WaitlistStarvationScanOps", "Waitlist operations by the starvation scan", func() int64 {
+		return pool.Stages.WlStarvationScanOps()
+	})
+	stats.NewCounterFunc(name+"WaitlistElementsExamined", "Waiters examined under the waitlist mutex; divided by the operation counts this shows whether an operation is O(1) or O(n)", func() int64 {
+		return pool.Stages.WlElementsExamined()
+	})
+	stats.NewCounterFunc(name+"WaitlistLenAtOpSum", "Sum of waitlist length observed at the start of each waitlist operation", func() int64 {
+		return pool.Stages.WlLenAtOpSum()
+	})
+	stats.NewCounterDurationFunc(name+"WaitlistHoldTimeSampled", "Sampled cumulative hold time of the waitlist mutex during return selection", func() time.Duration {
+		return pool.Stages.WlHoldTimeSampled()
+	})
+	stats.NewCounterFunc(name+"WaitlistHoldSampleCount", "Number of sampled waitlist mutex hold measurements", func() int64 {
+		return pool.Stages.WlHoldSampleCount()
+	})
+	stats.NewCounterFunc(name+"ExpiredWaitersEvicted", "Waiters removed by a returner because their acquisition context had already expired", func() int64 {
+		return pool.Stages.ExpiredEvicted()
+	})
+
 	stats.NewGaugeDurationFunc(name+"IdleTimeout", "Tablet server idle timeout", func() time.Duration {
 		return pool.IdleTimeout()
 	})
