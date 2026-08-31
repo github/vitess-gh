@@ -133,3 +133,40 @@ func TestPushFrontValue(t *testing.T) {
 	assert.Equal(t, a, l.Front())
 	assert.Equal(t, a, e.prev)
 }
+
+// TestRemoveIfPresentOwnership pins the contract that smartconnpool's waitlist
+// relies on to decide, between a waiter that is giving up and a returner that is
+// handing out a connection, which of the two owns the element.
+//
+// The return value is the ownership token: exactly one caller may see true for a
+// given element. If RemoveIfPresent ever reported true for an element it did not
+// remove, both parties would notify the same waiter's semaphore, and the extra
+// notification would leak onto whichever waiter next reuses that element from
+// the pool's sync.Pool. No test in smartconnpool asserts this directly.
+func TestRemoveIfPresentOwnership(t *testing.T) {
+	l := New[int]()
+	e := l.PushBack(1)
+
+	// present: removed, and the caller owns it
+	assert.True(t, l.RemoveIfPresent(e))
+	assert.Equal(t, 0, l.Len())
+
+	// already removed: must report false rather than panic or double-remove
+	assert.False(t, l.RemoveIfPresent(e))
+	assert.Equal(t, 0, l.Len())
+
+	// belongs to a different list: must not be removed from either
+	other := New[int]()
+	oe := other.PushBack(2)
+	assert.False(t, l.RemoveIfPresent(oe))
+	assert.Equal(t, 1, other.Len())
+	assert.Equal(t, 0, l.Len())
+
+	// removing one element must leave its neighbours linked
+	l2 := New[int]()
+	a, b, c := l2.PushBack(1), l2.PushBack(2), l2.PushBack(3)
+	assert.True(t, l2.RemoveIfPresent(b))
+	assert.Equal(t, 2, l2.Len())
+	assert.Equal(t, c, a.Next())
+	assert.False(t, l2.RemoveIfPresent(b))
+}

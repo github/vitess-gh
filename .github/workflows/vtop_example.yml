@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build:
     name: VTop Example
-    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-8cpu-32gb-x86-64' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.repository == 'vitessio/vitess' && 'oracle-vm-8cpu-32gb-x86-64' || vars.VTOP_RUNNER || 'ubuntu-latest-xl' }}
 
     steps:
       - name: Skip CI
@@ -89,4 +89,16 @@ jobs:
         timeout-minutes: 60
         run: |
           source build.env
-          go run test.go -docker=false -skip-build -print-log -follow -retry=1 -timeout=60m vtop_example
+          go run test.go -docker=false -skip-build -print-log -follow -timeout=60m vtop_example
+
+      # Failure-only. Outside vitessio/vitess the runner is selected by
+      # vars.VTOP_RUNNER (see runs-on above); an undersized runner shows up here
+      # as "FailedScheduling ... Insufficient cpu" instead of an opaque timeout.
+      - name: Cluster capacity on failure
+        if: failure() && steps.changes.outputs.end_to_end == 'true'
+        run: |
+          set +e
+          echo "host: $(nproc) cpu, $(free -m | awk '/^Mem:/{print $2}') MB"
+          kubectl describe node | sed -n '/^Allocatable:/,/^System Info:/p;/^Allocated resources:/,/^Events:/p'
+          kubectl get pods -A --field-selector=status.phase!=Running
+          kubectl get events -A --field-selector reason=FailedScheduling --sort-by=.lastTimestamp | tail -20
