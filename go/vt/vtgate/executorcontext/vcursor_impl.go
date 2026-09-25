@@ -56,6 +56,7 @@ import (
 	"vitess.io/vitess/go/vt/vtgate/logstats"
 	"vitess.io/vitess/go/vt/vtgate/planbuilder/plancontext"
 	"vitess.io/vitess/go/vt/vtgate/semantics"
+	"vitess.io/vitess/go/vt/vtgate/sequence"
 	"vitess.io/vitess/go/vt/vtgate/vindexes"
 	"vitess.io/vitess/go/vt/vtgate/vschemaacl"
 	"vitess.io/vitess/go/vt/vtgate/vtgateservice"
@@ -91,6 +92,8 @@ type (
 		WarmingReadsPercent int
 		WarmingReadsTimeout time.Duration
 		WarmingReadsChannel chan bool
+
+		SequenceCache *sequence.Cache
 	}
 
 	// vcursor_impl needs these facilities to be able to be able to execute queries for vindexes
@@ -358,6 +361,13 @@ func (vc *VCursorImpl) cloneWithAutocommitSession() *VCursorImpl {
 // GetExecutionMetrics provides the execution metrics object.
 func (vc *VCursorImpl) GetExecutionMetrics() *engine.Metrics {
 	return vc.metrics.GetExecutionMetrics()
+}
+
+func (vc *VCursorImpl) GetSequenceValues(ctx context.Context, key sequence.Key, count int64, refill sequence.Refill) (int64, error) {
+	if vc.config.SequenceCache == nil {
+		return refill(ctx, count)
+	}
+	return vc.config.SequenceCache.Get(ctx, key, count, refill)
 }
 
 // HasSystemVariables returns whether the session has set system variables or not
