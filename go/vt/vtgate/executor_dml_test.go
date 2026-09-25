@@ -1847,6 +1847,48 @@ func TestInsertGeneratorSharded(t *testing.T) {
 	utils.MustMatch(t, wantResult, result)
 }
 
+func TestInsertGeneratorShardedSequenceCache(t *testing.T) {
+	config := createExecutorConfig()
+	config.SequenceCacheEnabled = true
+	config.SequenceCacheSize = 3
+	executor, _, _, sbclookup, ctx := createExecutorEnvWithConfig(t, config)
+
+	sbclookup.SetResults([]*sqltypes.Result{{
+		Rows: [][]sqltypes.Value{{
+			sqltypes.NewInt64(1),
+		}},
+	}})
+	session := &vtgatepb.Session{
+		TargetString: "@primary",
+	}
+
+	first, err := executorExec(ctx, executor, session, "insert into user(v, `name`) values (2, 'first')", nil)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), first.InsertID)
+
+	second, err := executorExec(ctx, executor, session, "insert into user(v, `name`) values (2, 'second')", nil)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), second.InsertID)
+
+	wantQueries := []*querypb.BoundQuery{{
+		Sql:           "select next :n /* INT64 */ values from user_seq",
+		BindVariables: map[string]*querypb.BindVariable{"n": sqltypes.Int64BindVariable(3)},
+	}, {
+		Sql: "insert into name_user_map(`name`, user_id) values (:name_0, :user_id_0)",
+		BindVariables: map[string]*querypb.BindVariable{
+			"name_0":    sqltypes.StringBindVariable("first"),
+			"user_id_0": sqltypes.Uint64BindVariable(1),
+		},
+	}, {
+		Sql: "insert into name_user_map(`name`, user_id) values (:name_0, :user_id_0)",
+		BindVariables: map[string]*querypb.BindVariable{
+			"name_0":    sqltypes.StringBindVariable("second"),
+			"user_id_0": sqltypes.Uint64BindVariable(2),
+		},
+	}}
+	assertQueries(t, sbclookup, wantQueries)
+}
+
 func TestInsertAutoincSharded(t *testing.T) {
 	router, sbc, _, _, ctx := createExecutorEnv(t)
 
