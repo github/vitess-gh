@@ -65,6 +65,7 @@ import (
 	"vitess.io/vitess/go/vt/vtgate/logstats"
 	"vitess.io/vitess/go/vt/vtgate/planbuilder"
 	"vitess.io/vitess/go/vt/vtgate/planbuilder/plancontext"
+	"vitess.io/vitess/go/vt/vtgate/sequence"
 	"vitess.io/vitess/go/vt/vtgate/vindexes"
 	"vitess.io/vitess/go/vt/vtgate/vschemaacl"
 	"vitess.io/vitess/go/vt/vtgate/vtgateservice"
@@ -111,9 +112,11 @@ type (
 		Normalize  bool
 		StreamSize int
 		// AllowScatter will fail planning if set to false and a plan contains any scatter queries
-		AllowScatter        bool
-		WarmingReadsPercent int
-		QueryLogToFile      string
+		AllowScatter         bool
+		WarmingReadsPercent  int
+		QueryLogToFile       string
+		SequenceCacheEnabled bool
+		SequenceCacheSize    int64
 	}
 
 	Executor struct {
@@ -1640,6 +1643,9 @@ func (e *Executor) initVConfig(warnOnShardedOnly bool, pv plancontext.PlannerVer
 		WarmingReadsPercent: e.config.WarmingReadsPercent,
 		WarmingReadsTimeout: warmingReadsQueryTimeout,
 		WarmingReadsChannel: e.warmingReadsChannel,
+	}
+	if e.config.SequenceCacheEnabled {
+		e.vConfig.SequenceCache = sequence.NewCache(e.config.SequenceCacheSize)
 	}
 }
 

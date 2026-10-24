@@ -32,6 +32,7 @@ import (
 	vtrpcpb "vitess.io/vitess/go/vt/proto/vtrpc"
 	"vitess.io/vitess/go/vt/vterrors"
 	"vitess.io/vitess/go/vt/vtgate/evalengine"
+	"vitess.io/vitess/go/vt/vtgate/sequence"
 	"vitess.io/vitess/go/vt/vtgate/vindexes"
 )
 
@@ -89,8 +90,9 @@ type (
 	// Generate represents the instruction to generate
 	// a value from a sequence.
 	Generate struct {
-		Keyspace *vindexes.Keyspace
-		Query    string
+		Keyspace  *vindexes.Keyspace
+		TableName string
+		Query     string
 		// Values are the supplied values for the column, which
 		// will be stored as a list within the expression. New
 		// values will be generated based on how many were not
@@ -442,22 +444,27 @@ func (ic *InsertCommon) processGenerateFromValues(
 }
 
 func (ic *InsertCommon) execGenerate(ctx context.Context, vcursor VCursor, loggingPrimitive Primitive, count int64) (int64, error) {
-	// If generation is needed, generate the requested number of values (as one call).
-	rss, _, err := vcursor.ResolveDestinations(ctx, ic.Generate.Keyspace.Name, nil, []key.ShardDestination{key.DestinationAnyShard{}})
-	if err != nil {
-		return 0, err
+	sequenceKey := sequence.Key{
+		Keyspace: ic.Generate.Keyspace.Name,
+		Table:    ic.Generate.TableName,
 	}
-	if len(rss) != 1 {
-		return 0, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "auto sequence generation can happen through single shard only, it is getting routed to %d shards", len(rss))
-	}
-	bindVars := map[string]*querypb.BindVariable{nextValBV: sqltypes.Int64BindVariable(count)}
-	qr, err := vcursor.ExecuteStandalone(ctx, loggingPrimitive, ic.Generate.Query, bindVars, rss[0], ic.FetchLastInsertID)
-	if err != nil {
-		return 0, err
-	}
-	// If no rows are returned, it's an internal error, and the code
-	// must panic, which will be caught and reported.
-	return qr.Rows[0][0].ToCastInt64()
+	return vcursor.GetSequenceValues(ctx, sequenceKey, count, func(ctx context.Context, refillCount int64) (int64, error) {
+		rss, _, err := vcursor.ResolveDestinations(ctx, ic.Generate.Keyspace.Name, nil, []key.ShardDestination{key.DestinationAnyShard{}})
+		if err != nil {
+			return 0, err
+		}
+		if len(rss) != 1 {
+			return 0, vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "auto sequence generation can happen through single shard only, it is getting routed to %d shards", len(rss))
+		}
+		bindVars := map[string]*querypb.BindVariable{nextValBV: sqltypes.Int64BindVariable(refillCount)}
+		qr, err := vcursor.ExecuteStandalone(ctx, loggingPrimitive, ic.Generate.Query, bindVars, rss[0], ic.FetchLastInsertID)
+		if err != nil {
+			return 0, err
+		}
+		// If no rows are returned, it's an internal error, and the code
+		// must panic, which will be caught and reported.
+		return qr.Rows[0][0].ToCastInt64()
+	})
 }
 
 // shouldGenerate determines if a sequence value should be generated for a given value

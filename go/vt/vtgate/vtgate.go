@@ -168,6 +168,9 @@ var (
 	warmingReadsPercent      = 0
 	warmingReadsQueryTimeout = 5 * time.Second
 	warmingReadsConcurrency  = 500
+
+	enableSequenceCache bool
+	sequenceCacheSize   int64 = 1000
 )
 
 func registerFlags(fs *pflag.FlagSet) {
@@ -205,6 +208,8 @@ func registerFlags(fs *pflag.FlagSet) {
 	fs.IntVar(&warmingReadsPercent, "warming-reads-percent", 0, "Percentage of reads on the primary to forward to replicas. Useful for keeping buffer pools warm")
 	fs.IntVar(&warmingReadsConcurrency, "warming-reads-concurrency", 500, "Number of concurrent warming reads allowed")
 	fs.DurationVar(&warmingReadsQueryTimeout, "warming-reads-query-timeout", 5*time.Second, "Timeout of warming read queries")
+	utils.SetFlagBoolVar(fs, &enableSequenceCache, "enable-sequence-cache", enableSequenceCache, "Cache ranges allocated from VSchema auto_increment sequences in VTGate.")
+	utils.SetFlagInt64Var(fs, &sequenceCacheSize, "sequence-cache-size", sequenceCacheSize, "Number of IDs reserved per VTGate sequence cache refill.")
 
 	viperutil.BindFlags(fs,
 		enableOnlineDDL,
@@ -295,6 +300,10 @@ func Init(
 	tabletTypesToWait []topodatapb.TabletType,
 	pv plancontext.PlannerVersion,
 ) *VTGate {
+	if enableSequenceCache && sequenceCacheSize < 1 {
+		log.Fatalf("sequence-cache-size must be positive when enable-sequence-cache is set: %d", sequenceCacheSize)
+	}
+
 	ts, err := serv.GetTopoServer()
 	if err != nil {
 		log.Fatalf("Unable to get Topo server: %v", err)
@@ -376,11 +385,13 @@ func Init(
 	plans := DefaultPlanCache()
 
 	eConfig := ExecutorConfig{
-		Normalize:           normalizeQueries,
-		StreamSize:          streamBufferSize,
-		AllowScatter:        !noScatter,
-		WarmingReadsPercent: warmingReadsPercent,
-		QueryLogToFile:      queryLogToFile,
+		Normalize:            normalizeQueries,
+		StreamSize:           streamBufferSize,
+		AllowScatter:         !noScatter,
+		WarmingReadsPercent:  warmingReadsPercent,
+		QueryLogToFile:       queryLogToFile,
+		SequenceCacheEnabled: enableSequenceCache,
+		SequenceCacheSize:    sequenceCacheSize,
 	}
 
 	executor := NewExecutor(ctx, env, serv, cell, resolver, eConfig, warnShardedOnly, plans, si, pv, dynamicConfig)

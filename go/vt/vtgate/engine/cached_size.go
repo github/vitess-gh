@@ -391,10 +391,12 @@ func (cached *Generate) CachedSize(alloc bool) int64 {
 	}
 	size := int64(0)
 	if alloc {
-		size += int64(48)
+		size += int64(64)
 	}
 	// field Keyspace *vitess.io/vitess/go/vt/vtgate/vindexes.Keyspace
 	size += cached.Keyspace.CachedSize(true)
+	// field TableName string
+	size += hack.RuntimeAllocSize(int64(len(cached.TableName)))
 	// field Query string
 	size += hack.RuntimeAllocSize(int64(len(cached.Query)))
 	// field Values vitess.io/vitess/go/vt/vtgate/evalengine.Expr
