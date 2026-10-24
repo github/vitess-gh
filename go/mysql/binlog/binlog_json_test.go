@@ -247,6 +247,16 @@ func TestBinaryJSON(t *testing.T) {
 			expected: json.NewNumber("-0.1", json.NumberTypeDecimal),
 		},
 		{
+			name:     `decimal "0.000000001" (scale is a multiple of 9, integer part is zero)`,
+			data:     []byte{15, 246, 7, 10, 9, 0x80, 0x00, 0x00, 0x00, 0x01},
+			expected: json.NewNumber("0.000000001", json.NumberTypeDecimal),
+		},
+		{
+			name:     `decimal "-0.000000001" (negative, scale is a multiple of 9, integer part is zero)`,
+			data:     []byte{15, 246, 7, 10, 9, 0x7F, 0xFF, 0xFF, 0xFF, 0xFE},
+			expected: json.NewNumber("-0.000000001", json.NumberTypeDecimal),
+		},
+		{
 			name:     `bit literal 0xCAFE`,
 			data:     []byte{15, 16, 2, 202, 254},
 			expected: json.NewBit(string([]byte{202, 254})),
@@ -297,6 +307,39 @@ func TestBinaryJSONOpaqueErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseBinaryJSON(tc.data)
 			require.ErrorContains(t, err, tc.expectedErr)
+		})
+	}
+}
+
+func TestParseBinaryJSONDiffPathEscaping(t *testing.T) {
+	testcases := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{
+			name:     "plain path is unchanged",
+			path:     `$.role`,
+			expected: `JSON_REMOVE(%s, _utf8mb4'$.role')`,
+		},
+		{
+			name:     "single quote in key is escaped",
+			path:     `$."a'b"`,
+			expected: `JSON_REMOVE(%s, _utf8mb4'$."a\'b"')`,
+		},
+		{
+			name:     "backslash in key is escaped",
+			path:     `$."a\b"`,
+			expected: `JSON_REMOVE(%s, _utf8mb4'$."a\\b"')`,
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte{byte(jsonDiffOpRemove), byte(len(tc.path))}
+			data = append(data, tc.path...)
+			val, err := ParseBinaryJSONDiff(data)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, val.RawStr())
 		})
 	}
 }

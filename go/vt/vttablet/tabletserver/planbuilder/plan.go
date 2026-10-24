@@ -20,7 +20,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"vitess.io/vitess/go/mysql/sqlmode"
 	"vitess.io/vitess/go/vt/sqlparser"
+	"vitess.io/vitess/go/vt/sysvars"
 	"vitess.io/vitess/go/vt/tableacl"
 	"vitess.io/vitess/go/vt/vtenv"
 	"vitess.io/vitess/go/vt/vterrors"
@@ -162,6 +164,13 @@ type Plan struct {
 
 	// Permissions stores the permissions for the tables accessed in the query.
 	Permissions []Permission
+	// TablesUndetermined is set for a statement whose tables the parser
+	// discards or leaves opaque (DO, CALL, REPAIR, OPTIMIZE, LOAD DATA, a
+	// partially parsed CREATE TABLE): Permissions does not cover everything
+	// the statement touches, whether it is empty or names the tables the
+	// parser did keep. Under strict table ACL the executor denies such a
+	// statement rather than skip the check.
+	TablesUndetermined bool
 
 	// FullQuery will be set for all plans.
 	FullQuery *sqlparser.ParsedQuery
@@ -178,6 +187,12 @@ type Plan struct {
 
 	// NeedsReservedConn indicates at a reserved connection is needed to execute this plan
 	NeedsReservedConn bool
+
+	// VerifySQLMode is set on a PlanSet that assigns sql_mode a value that could not be
+	// judged at plan time (a non-constant expression): the executor must read back the
+	// applied value and validate it with sqlmode.Validate. Such a plan has sql_mode as
+	// its only assignment (see validateSetStatementSQLMode).
+	VerifySQLMode bool
 }
 
 // TableName returns the table name for the plan.
@@ -215,7 +230,7 @@ func Build(env *vtenv.Environment, statement sqlparser.Statement, tables map[str
 	case *sqlparser.Delete:
 		plan, err = analyzeDelete(stmt, tables)
 	case *sqlparser.Set:
-		plan = analyzeSet(stmt)
+		plan, err = analyzeSet(stmt)
 	case sqlparser.DDLStatement:
 		plan, err = analyzeDDL(stmt)
 	case *sqlparser.AlterMigration:
@@ -260,17 +275,17 @@ func Build(env *vtenv.Environment, statement sqlparser.Statement, tables map[str
 		return nil, err
 	}
 	plan.AllTables = lookupAllTables(statement, tables)
-	plan.Permissions = BuildPermissions(statement)
+	plan.Permissions, plan.TablesUndetermined = BuildPermissions(statement)
 	return plan, nil
 }
 
 // BuildStreaming builds a streaming plan based on the schema.
 func BuildStreaming(statement sqlparser.Statement, tables map[string]*schema.Table) (*Plan, error) {
 	plan := &Plan{
-		PlanID:      PlanSelectStream,
-		FullQuery:   GenerateFullQuery(statement),
-		Permissions: BuildPermissions(statement),
+		PlanID:    PlanSelectStream,
+		FullQuery: GenerateFullQuery(statement),
 	}
+	plan.Permissions, plan.TablesUndetermined = BuildPermissions(statement)
 
 	switch stmt := statement.(type) {
 	case *sqlparser.Select:
@@ -278,7 +293,9 @@ func BuildStreaming(statement sqlparser.Statement, tables map[string]*schema.Tab
 			plan.NeedsReservedConn = true
 		}
 		plan.Table = lookupTables(stmt.From, tables)
-	case *sqlparser.Show, *sqlparser.Union, *sqlparser.CallProc, sqlparser.Explain:
+	case *sqlparser.Show, *sqlparser.Union, sqlparser.Explain:
+	case *sqlparser.CallProc:
+		plan.PlanID = PlanCallProc
 	case *sqlparser.Analyze:
 		plan.PlanID = PlanOtherRead
 	default:
@@ -325,14 +342,15 @@ func hasLockFunc(sel *sqlparser.Select) bool {
 	return found
 }
 
-// BuildSettingQuery builds a query for system settings.
-func BuildSettingQuery(settings []string, parser *sqlparser.Parser) (query string, resetQuery string, err error) {
+// BuildSettingQuery builds a query for system settings. When rejectSubqueries
+// is set, a setting with a subquery is refused, see rejectSettingSubqueries.
+func BuildSettingQuery(settings []string, parser *sqlparser.Parser, rejectSubqueries bool) (query string, resetQuery string, err error) {
 	if len(settings) == 0 {
 		return "", "", vterrors.Errorf(vtrpcpb.Code_INTERNAL, "[BUG]: plan called for empty system settings")
 	}
 	var setExprs sqlparser.SetExprs
 	var resetSetExprs sqlparser.SetExprs
-	lDefault := sqlparser.NewStrLiteral("default")
+	defaultValue := &sqlparser.Default{}
 	for _, setting := range settings {
 		stmt, err := parser.Parse(setting)
 		if err != nil {
@@ -342,14 +360,90 @@ func BuildSettingQuery(settings []string, parser *sqlparser.Parser) (query strin
 		if !ok {
 			return "", "", vterrors.Errorf(vtrpcpb.Code_INTERNAL, "[BUG]: invalid set statement: %s", setting)
 		}
+		// settings are applied with no table ACL check, so a subquery is refused
+		// where the ACL is enforced, and with no verification afterwards, so
+		// sql_mode values must be constants that can be judged here
+		if rejectSubqueries {
+			if err := rejectSettingSubqueries(set, setting); err != nil {
+				return "", "", err
+			}
+		}
+		if err := validateConstantSetExprsSQLMode(set.Exprs); err != nil {
+			return "", "", err
+		}
+		if err := rejectSettingCharsetExprs(set.Exprs); err != nil {
+			return "", "", err
+		}
 		setExprs = append(setExprs, set.Exprs...)
 		for _, sExpr := range set.Exprs {
 			sysVar := sExpr.Var
 			if sysVar.Scope != sqlparser.SessionScope && sysVar.Scope != sqlparser.NoScope {
 				return "", "", vterrors.Errorf(vtrpcpb.Code_INTERNAL, "[BUG]: session scope expected, got: %s", sysVar.Scope.ToString())
 			}
-			resetSetExprs = append(resetSetExprs, &sqlparser.SetExpr{Var: sysVar, Expr: lDefault})
+			resetExpr := sqlparser.Expr(defaultValue)
+			switch sysVar.Name.Lowered() {
+			case sysvars.ForeignKeyChecks, sysvars.UniqueChecks:
+				// MySQL Bug#121262: `SET SESSION foreign_key_checks = DEFAULT` (and
+				// unique_checks) sets the session value to the opposite of the global
+				// value, so `default` would hand the next caller a connection with the
+				// checks off. Restore the global value explicitly, which is what DEFAULT
+				// means for a session variable.
+				resetExpr = &sqlparser.Variable{Scope: sqlparser.GlobalScope, Name: sysVar.Name}
+			case sysvars.SQLMode.Name:
+				// `default` would re-inherit the server's global sql_mode including its
+				// lexer modes, undoing the neutralization every Vitess-created
+				// connection starts with (see sqlmode.NeutralizeSessionQuery); restore
+				// the neutralized global instead
+				resetExpr, err = parser.ParseExpr(sqlmode.NeutralizedGlobalExpr)
+				if err != nil {
+					return "", "", vterrors.Wrapf(err, "[BUG]: failed to parse the sql_mode reset expression")
+				}
+			}
+			resetSetExprs = append(resetSetExprs, &sqlparser.SetExpr{Var: sysVar, Expr: resetExpr})
 		}
 	}
 	return sqlparser.String(&sqlparser.Set{Exprs: setExprs}), sqlparser.String(&sqlparser.Set{Exprs: resetSetExprs}), nil
+}
+
+// rejectSettingSubqueries refuses a connection setting whose expressions embed
+// a subquery. A setting is applied to the connection with no table ACL check,
+// so the tables a subquery reads would go unchecked. Settings carry constants:
+// vtgate evaluates a SET's expression on a shard, where the tablet checks it
+// like any read, and sends the value. The check only runs where strict table
+// ACL is enforced, not in a dry run: without enforcement there is nothing for
+// it to protect, and a vtgate from before the value was sent still sends a
+// targeted session's SET expression as written, which would break for nothing.
+func rejectSettingSubqueries(set *sqlparser.Set, setting string) error {
+	if hasSubquery(set) {
+		return vterrors.Errorf(vtrpcpb.Code_INVALID_ARGUMENT, "connection setting must not contain a subquery: %s", setting)
+	}
+	return nil
+}
+
+// SettingWithSubquery returns the first of the connection settings whose
+// expressions embed a subquery, which strict table ACL refuses (see
+// rejectSettingSubqueries), or "" when there is none. A setting that does not
+// parse as a SET statement is skipped: the settings validation reports it.
+func SettingWithSubquery(settings []string, parser *sqlparser.Parser) string {
+	for _, setting := range settings {
+		stmt, err := parser.Parse(setting)
+		if err != nil {
+			continue
+		}
+		if set, ok := stmt.(*sqlparser.Set); ok && hasSubquery(set) {
+			return setting
+		}
+	}
+	return ""
+}
+
+func hasSubquery(set *sqlparser.Set) bool {
+	var found bool
+	_ = sqlparser.Walk(func(node sqlparser.SQLNode) (bool, error) {
+		if _, ok := node.(*sqlparser.Subquery); ok {
+			found = true
+		}
+		return !found, nil
+	}, set)
+	return found
 }

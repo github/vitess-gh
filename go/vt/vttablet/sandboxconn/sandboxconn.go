@@ -81,6 +81,7 @@ type SandboxConn struct {
 	ReserveCount                atomic.Int64
 	ReleaseCount                atomic.Int64
 	GetSchemaCount              atomic.Int64
+	ExecDelayResponse           time.Duration
 	GetSchemaDelayResponse      time.Duration
 
 	queriesRequireLocking bool
@@ -156,6 +157,22 @@ func NewSandboxConn(t *topodatapb.Tablet) *SandboxConn {
 		MustFailExecute: make(map[sqlparser.StatementType]int),
 		txIDToRID:       make(map[int64]int64),
 		parser:          sqlparser.NewTestParser(),
+	}
+}
+
+func (sbc *SandboxConn) waitForExecDelay(ctx context.Context) error {
+	if sbc.ExecDelayResponse <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(sbc.ExecDelayResponse)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -235,6 +252,15 @@ func (sbc *SandboxConn) appendToQueries(q *querypb.BoundQuery) {
 	sbc.Queries = append(sbc.Queries, q)
 }
 
+// appendToOptions appends to the Options in sandboxconn.
+func (sbc *SandboxConn) appendToOptions(o *querypb.ExecuteOptions) {
+	if sbc.queriesRequireLocking {
+		sbc.queriesMu.Lock()
+		defer sbc.queriesMu.Unlock()
+	}
+	sbc.Options = append(sbc.Options, o)
+}
+
 func (sbc *SandboxConn) getError() error {
 	for code, count := range sbc.MustFailCodes {
 		if count == 0 {
@@ -281,8 +307,11 @@ func (sbc *SandboxConn) Execute(ctx context.Context, target *querypb.Target, que
 		Sql:           query,
 		BindVariables: bv,
 	})
-	sbc.Options = append(sbc.Options, options)
+	sbc.appendToOptions(options)
 	if err := sbc.getError(); err != nil {
+		return nil, err
+	}
+	if err := sbc.waitForExecDelay(ctx); err != nil {
 		return nil, err
 	}
 
@@ -307,9 +336,13 @@ func (sbc *SandboxConn) StreamExecute(ctx context.Context, target *querypb.Targe
 		Sql:           query,
 		BindVariables: bv,
 	})
-	sbc.Options = append(sbc.Options, options)
+	sbc.appendToOptions(options)
 	err := sbc.getError()
 	if err != nil {
+		sbc.sExecMu.Unlock()
+		return err
+	}
+	if err := sbc.waitForExecDelay(ctx); err != nil {
 		sbc.sExecMu.Unlock()
 		return err
 	}

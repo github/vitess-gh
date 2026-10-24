@@ -7,6 +7,10 @@ on:
     tags: '**'
   pull_request:
     branches: '**'
+concurrency:
+  group: format('{0}-{1}', ${{ github.ref }}, 'endtoend')
+  cancel-in-progress: true
+
 permissions: read-all
 jobs:
 
@@ -44,9 +48,12 @@ jobs:
             - 'config/**'
             - 'bootstrap.sh'
             - '.github/workflows/endtoend.yml'
+            - '.github/actions/setup-mysql/action.yml'
+            - '.github/actions/setup-go/action.yml'
 
     - name: Set up Go
       if: steps.changes.outputs.end_to_end == 'true'
+      # zizmor: ignore[cache-poisoning] this workflow publishes no artifacts
       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version-file: go.mod
@@ -58,7 +65,7 @@ jobs:
 
     - name: Setup MySQL
       if: steps.changes.outputs.end_to_end == 'true'
-      uses: ./.github/actions/setup-mysql
+      uses: $/.github/actions/setup-mysql
       with:
         flavor: mysql-8.0
 
@@ -69,8 +76,6 @@ jobs:
         sudo apt-get install -y make unzip g++ etcd-client etcd-server curl git wget
         
         sudo service etcd stop
-
-        go mod download
 
     - name: Run make minimaltools
       if: steps.changes.outputs.end_to_end == 'true'

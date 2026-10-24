@@ -57,9 +57,12 @@ jobs:
             - 'config/**'
             - 'bootstrap.sh'
             - '.github/workflows/vitess_tester_vtgate.yml'
+            - '.github/actions/setup-mysql/action.yml'
+            - '.github/actions/setup-go/action.yml'
 
     - name: Set up Go
       if: steps.changes.outputs.end_to_end == 'true'
+      # zizmor: ignore[cache-poisoning] this workflow publishes no artifacts
       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version-file: go.mod
@@ -75,7 +78,7 @@ jobs:
 
     - name: Setup MySQL
       if: steps.changes.outputs.end_to_end == 'true'
-      uses: ./.github/actions/setup-mysql
+      uses: $/.github/actions/setup-mysql
       with:
         flavor: mysql-8.4
 
@@ -88,8 +91,6 @@ jobs:
         sudo apt-get -qq install -y make unzip g++ etcd-client etcd-server curl git wget xz-utils libncurses6
 
         sudo service etcd stop
-
-        go mod download
 
         # install JUnit report formatter
         go install github.com/vitessio/go-junit-report@HEAD

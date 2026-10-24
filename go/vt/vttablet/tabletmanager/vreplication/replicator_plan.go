@@ -365,6 +365,53 @@ func (tp *TablePlan) bindFieldVal(field *querypb.Field, val *sqltypes.Value) (*q
 	return sqltypes.ValueBindVariable(*val), nil
 }
 
+// validateRowImage checks that a row (a change's Before or After image, or a
+// copy-phase row) is consistent with the table plan before its values are
+// read: one length per field, each length either -1 (an omitted value) or a
+// byte count the Values buffer can still satisfy. A shorter row would make
+// the per-field loops index out of range, a longer one would make
+// MakeRowTrusted index fields out of range, and a short Values buffer would
+// make the value slicing go out of range. Negative lengths other than -1 are
+// rejected as well: the readers treat them as NULL, which for a PK column
+// turns a delete into a silent no-op. Lengths are checked one at a time
+// against the remaining buffer so that adding them up cannot overflow, and
+// they must consume the buffer exactly: Values is defined as the
+// concatenation of the row's values, so trailing bytes mean a length
+// under-declares a value and the remaining values would be applied shifted.
+// The vstreamer derives the field event and every row from the same plan, so
+// a mismatch is a malformed stream payload that replaying the same event
+// cannot repair: the error is terminal, like the shape checks on the bulk
+// paths. what names the row for the error message, e.g. "Before image of
+// bulk-delete change" or "copy row".
+func (tp *TablePlan) validateRowImage(row *querypb.Row, what string) error {
+	if len(row.Lengths) != len(tp.Fields) {
+		return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+			"vreplication: %s for table %s is malformed (%d values, expected %d)",
+			what, tp.TargetName, len(row.Lengths), len(tp.Fields))
+	}
+	remaining := int64(len(row.Values))
+	for i, length := range row.Lengths {
+		switch {
+		case length < -1:
+			return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+				"vreplication: %s for table %s is malformed (invalid length %d at column %d)",
+				what, tp.TargetName, length, i)
+		case length > remaining:
+			return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+				"vreplication: %s for table %s is malformed (length %d at column %d exceeds the %d bytes remaining)",
+				what, tp.TargetName, length, i, remaining)
+		case length > 0:
+			remaining -= length
+		}
+	}
+	if remaining != 0 {
+		return vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+			"vreplication: %s for table %s is malformed (%d trailing bytes after the declared lengths)",
+			what, tp.TargetName, remaining)
+	}
+	return nil
+}
+
 func (tp *TablePlan) applyChange(rowChange *binlogdatapb.RowChange, executor func(string) (*sqltypes.Result, error)) (*sqltypes.Result, error) {
 	// MakeRowTrusted is needed here because Proto3ToResult is not convenient.
 	var (
@@ -374,6 +421,9 @@ func (tp *TablePlan) applyChange(rowChange *binlogdatapb.RowChange, executor fun
 	bindvars := make(map[string]*querypb.BindVariable, len(tp.Fields))
 	if rowChange.Before != nil {
 		before = true
+		if err := tp.validateRowImage(rowChange.Before, "Before image of change"); err != nil {
+			return nil, err
+		}
 		vals := sqltypes.MakeRowTrusted(tp.Fields, rowChange.Before)
 		for i, field := range tp.Fields {
 			bindVar, err := tp.bindFieldVal(field, &vals[i])
@@ -386,6 +436,9 @@ func (tp *TablePlan) applyChange(rowChange *binlogdatapb.RowChange, executor fun
 	if rowChange.After != nil {
 		jsonIndex := 0
 		after = true
+		if err := tp.validateRowImage(rowChange.After, "After image of change"); err != nil {
+			return nil, err
+		}
 		afterVals = sqltypes.MakeRowTrusted(tp.Fields, rowChange.After)
 		for i, field := range tp.Fields {
 			var (
@@ -572,18 +625,47 @@ func (tp *TablePlan) applyBulkDeleteChanges(rowDeletes []*binlogdatapb.RowChange
 		return executor(query)
 	}
 
+	// Derive pkIndex once from the plan, not from per-row vals. PKIndices is sized to
+	// the column count and is populated by the plan builder before this runs, so the
+	// index has no dependency on the shape of any individual row's Before image. The
+	// original per-row search ran the inner `range vals` on iteration 0; an empty
+	// first-row vals (see #20360) left pkIndex at -1 and the subsequent vals[-1]
+	// access panicked. Hoisting the search removes that data dependency. Other panic
+	// surfaces in this loop (e.g. vals[pkIndex] on a short later row) are caught by
+	// the defer/recover wrapper on vp.fetchAndApply's applyEvents goroutine.
 	pkIndex := -1
+	for i, isPK := range tp.PKIndices {
+		if isPK {
+			pkIndex = i
+			break
+		}
+	}
+	// Defensive: PKIndices and Fields are populated separately (the former from
+	// the plan builder's colExprs, the latter from the field event), so guard
+	// against any desync that would leave pkIndex out of range for tp.Fields.
+	if pkIndex < 0 || pkIndex >= len(tp.Fields) {
+		return nil, vterrors.Errorf(vtrpcpb.Code_INTERNAL,
+			"vreplication: bulk-delete plan for table %s has no valid primary key index (pkIndex=%d, len(Fields)=%d)",
+			tp.TargetName, pkIndex, len(tp.Fields))
+	}
+
 	pkVals := make([]sqltypes.Value, 0, len(rowDeletes))
 	for _, rowDelete := range rowDeletes {
-		vals := sqltypes.MakeRowTrusted(tp.Fields, rowDelete.Before)
-		if pkIndex == -1 {
-			for i := range vals {
-				if tp.PKIndices[i] {
-					pkIndex = i
-					break
-				}
-			}
+		// The caller must only route homogeneous delete-shaped events here: a
+		// nil Before image would panic in MakeRowTrusted, an empty one (the
+		// #20360 shape) would panic indexing vals[pkIndex], and a change with
+		// an After image (an insert or update) would be silently applied as a
+		// DELETE, discarding that image. The Get accessors also make a nil
+		// change in the slice error instead of panicking.
+		if len(rowDelete.GetBefore().GetLengths()) == 0 || rowDelete.GetAfter() != nil {
+			return nil, vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+				"vreplication: bulk-delete change for table %s is not delete-shaped (Before image only); a mixed row event must be applied per-change",
+				tp.TargetName)
 		}
+		if err := tp.validateRowImage(rowDelete.Before, "Before image of bulk-delete change"); err != nil {
+			return nil, err
+		}
+		vals := sqltypes.MakeRowTrusted(tp.Fields, rowDelete.Before)
 		addedSize := int64(len(vals[pkIndex].Raw()) + 2) // Plus 2 for the comma and space
 		if querySize+addedSize > maxQuerySize {
 			if _, err := execQuery(&pkVals); err != nil {
@@ -626,6 +708,20 @@ func (tp *TablePlan) applyBulkInsertChanges(rowInserts []*binlogdatapb.RowChange
 
 	newStmt := true
 	for _, rowInsert := range rowInserts {
+		// The caller must only route homogeneous insert-shaped events here: a
+		// nil After image would panic in MakeRowTrusted, an empty one would
+		// panic indexing the row in the field loop, and a change with a
+		// Before image (a delete or update) would be silently applied as an
+		// INSERT, discarding that image. The Get accessors also make a nil
+		// change in the slice error instead of panicking.
+		if len(rowInsert.GetAfter().GetLengths()) == 0 || rowInsert.GetBefore() != nil {
+			return nil, vterrors.Errorf(vtrpcpb.Code_FAILED_PRECONDITION,
+				"vreplication: bulk-insert change for table %s is not insert-shaped (After image only); a mixed row event must be applied per-change",
+				tp.TargetName)
+		}
+		if err := tp.validateRowImage(rowInsert.After, "After image of bulk-insert change"); err != nil {
+			return nil, err
+		}
 		var (
 			err     error
 			bindVar *querypb.BindVariable
@@ -724,9 +820,8 @@ func (tp *TablePlan) appendFromRow(buf *bytes2.Buffer, row *querypb.Row) error {
 		return vterrors.Errorf(vtrpcpb.Code_INTERNAL, "wrong number of fields: got %d fields for %d bind locations",
 			len(tp.Fields), len(bindLocations))
 	}
-	if len(row.Lengths) < len(tp.Fields) {
-		return vterrors.Errorf(vtrpcpb.Code_INTERNAL, "wrong number of lengths: got %d lengths for %d fields",
-			len(row.Lengths), len(tp.Fields))
+	if err := tp.validateRowImage(row, "copy row"); err != nil {
+		return err
 	}
 
 	// Bind field values to locations.

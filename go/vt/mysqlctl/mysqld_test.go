@@ -331,6 +331,51 @@ func TestGetDbaConnection(t *testing.T) {
 	defer conn.Close()
 }
 
+// TestExecuteMysqlScript checks that a script runs as the batch of statements
+// it is, whether or not its connection parameters ask for multi statement
+// support.
+func TestExecuteMysqlScript(t *testing.T) {
+	const script = "create table t1 (id int primary key);create table t2 (id int primary key)"
+	statements := []string{"create table t1 (id int primary key)", "create table t2 (id int primary key)"}
+
+	testCases := []struct {
+		name                  string
+		enableMultiStatements bool
+	}{{
+		name: "connection without multi statement support",
+		// What the dba configuration hands out: the script path has to ask
+		// for the capability itself.
+		enableMultiStatements: false,
+	}, {
+		name: "connection with multi statement support",
+		// What mysqld bootstrap hands out: the capability is already there.
+		enableMultiStatements: true,
+	}}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := fakesqldb.New(t)
+			defer db.Close()
+			db.AddQueryPattern(".*", &sqltypes.Result{})
+
+			params := *db.ConnParams()
+			params.EnableMultiStatements = tc.enableMultiStatements
+
+			testMysqld := NewMysqld(dbconfigs.NewTestDBConfigs(params, params, "fakesqldb"))
+			defer testMysqld.Close()
+
+			require.NoError(t, testMysqld.executeMysqlScript(t.Context(), &params, script))
+
+			// Each statement of the script must reach the server on its own. A
+			// script that was sent without the capability is counted under the
+			// joined query.
+			for _, statement := range statements {
+				require.Equal(t, 1, db.GetQueryCalledNum(statement), "statement %q was not executed on its own, query log: %v", statement, db.QueryLog())
+			}
+		})
+	}
+}
+
 func TestGetVersionString(t *testing.T) {
 	db := fakesqldb.New(t)
 	defer db.Close()
@@ -432,4 +477,46 @@ func TestBuildLdPathsTZ(t *testing.T) {
 	env, err := buildLdPaths()
 	assert.NoError(t, err)
 	assert.Contains(t, env, "TZ=Europe/Berlin")
+}
+
+// TestMysqlbinlogEnvironForcesUTC verifies that the environment used for
+// mysqlbinlog forces TZ=UTC so that the UTC-formatted --stop-datetime is
+// interpreted as UTC regardless of the host time zone. It also verifies that
+// the shared base environment is not mutated. Regression test for #20373.
+func TestMysqlbinlogEnvironForcesUTC(t *testing.T) {
+	base := []string{"LD_LIBRARY_PATH=/opt/mysql/lib", "LD_PRELOAD="}
+	baseCopy := append([]string(nil), base...)
+
+	got := mysqlbinlogEnviron(base)
+
+	require.Contains(t, got, "TZ=UTC")
+	// every entry from the base environment is preserved
+	for _, e := range baseCopy {
+		require.Contains(t, got, e)
+	}
+	// the shared base environment is left untouched (it is reused by the mysql
+	// command that applies the mysqlbinlog output)
+	require.Equal(t, baseCopy, base)
+}
+
+// TestMysqlbinlogEnvironOverridesExistingTZ verifies that a pre-existing TZ
+// entry in the base environment (e.g. from os.Environ() via buildLdPaths())
+// is replaced, not duplicated, so mysqlbinlog can't end up seeing two TZ
+// values.
+func TestMysqlbinlogEnvironOverridesExistingTZ(t *testing.T) {
+	base := []string{"LD_LIBRARY_PATH=/opt/mysql/lib", "TZ=Europe/Berlin"}
+	baseCopy := append([]string(nil), base...)
+
+	got := mysqlbinlogEnviron(base)
+
+	count := 0
+	for _, e := range got {
+		if strings.HasPrefix(e, "TZ=") {
+			count++
+		}
+	}
+	require.Equal(t, 1, count, "expected exactly one TZ entry, got %v", got)
+	require.Contains(t, got, "TZ=UTC")
+	require.NotContains(t, got, "TZ=Europe/Berlin")
+	require.Equal(t, baseCopy, base)
 }

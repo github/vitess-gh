@@ -118,7 +118,8 @@ func TestPlanKey(t *testing.T) {
 		targetString: "ks1[deadbeef]",
 		resolvedShard: []*srvtopo.ResolvedShard{
 			{Target: &querypb.Target{Keyspace: "ks1", Shard: "-66"}},
-			{Target: &querypb.Target{Keyspace: "ks1", Shard: "66-"}}},
+			{Target: &querypb.Target{Keyspace: "ks1", Shard: "66-"}},
+		},
 		expectedPlanPrefixKey: "CurrentKeyspace: ks1, TabletType: PRIMARY, Destination: -66,66-, Query: SELECT 1, SetVarComment: , Collation: 255",
 	}}
 	cfg := econtext.VCursorConfig{
@@ -196,7 +197,7 @@ func TestExecutorMaxMemoryRowsExceeded(t *testing.T) {
 		}
 
 		sbclookup.SetResults([]*sqltypes.Result{result})
-		err = executor.StreamExecute(ctx, nil, "TestExecutorMaxMemoryRowsExceeded", session, test.query, nil, fn)
+		err = executor.StreamExecute(ctx, nil, "TestExecutorMaxMemoryRowsExceeded", session, test.query, nil, false, fn)
 		require.NoError(t, err, "maxMemoryRows limit does not apply to StreamExecute")
 	}
 }
@@ -351,7 +352,7 @@ func TestExecutorTransactionsAutoCommitStreaming(t *testing.T) {
 	var results []*sqltypes.Result
 
 	// begin.
-	err := executor.StreamExecute(ctx, nil, "TestExecute", session, "begin", nil, func(result *sqltypes.Result) error {
+	err := executor.StreamExecute(ctx, nil, "TestExecute", session, "begin", nil, false, func(result *sqltypes.Result) error {
 		results = append(results, result)
 		return nil
 	})
@@ -569,7 +570,6 @@ func TestExecutorShowColumns(t *testing.T) {
 			sbclookup.BatchQueries = nil
 		})
 	}
-
 }
 
 func sortString(w string) string {
@@ -1592,6 +1592,71 @@ func TestExecutorDeniedErrorNoBuffer(t *testing.T) {
 	require.GreaterOrEqual(t, endExec.Sub(startExec).Milliseconds(), int64(500))
 }
 
+// TestVTGateExecuteMultiTimeoutUsesParentContextPerStatement verifies that
+// each statement in an ExecuteMulti request receives a timeout derived from the
+// original request context.
+func TestVTGateExecuteMultiTimeoutUsesParentContextPerStatement(t *testing.T) {
+	executor, sbc1, sbc2, _, ctx := createExecutorEnv(t)
+
+	oldTimeout := mysqlQueryTimeout
+	mysqlQueryTimeout = 100 * time.Millisecond
+	sbc1.ExecDelayResponse = 5 * time.Millisecond
+	t.Cleanup(func() {
+		mysqlQueryTimeout = oldTimeout
+		sbc1.ExecDelayResponse = 0
+	})
+
+	session := &vtgatepb.Session{
+		Autocommit:   true,
+		TargetString: "TestExecutor",
+	}
+	vtg := newVTGate(executor, nil, nil, nil, nil)
+
+	_, results, err := vtg.ExecuteMulti(ctx, nil, session, "select id from user where id = 1; select id from user where id = 1")
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.EqualValues(t, 2, sbc1.ExecCount.Load())
+	require.Zero(t, sbc2.ExecCount.Load())
+}
+
+// TestVTGateStreamExecuteMultiTimeoutUsesParentContextPerStatement verifies
+// that each statement in a StreamExecuteMulti request receives a timeout
+// derived from the original request context.
+func TestVTGateStreamExecuteMultiTimeoutUsesParentContextPerStatement(t *testing.T) {
+	executor, sbc1, sbc2, _, ctx := createExecutorEnv(t)
+
+	oldTimeout := mysqlQueryTimeout
+	mysqlQueryTimeout = 100 * time.Millisecond
+	sbc1.ExecDelayResponse = 5 * time.Millisecond
+	t.Cleanup(func() {
+		mysqlQueryTimeout = oldTimeout
+		sbc1.ExecDelayResponse = 0
+	})
+
+	session := &vtgatepb.Session{
+		Autocommit:   true,
+		TargetString: "TestExecutor",
+	}
+	vtg := newVTGate(executor, nil, nil, nil, nil)
+	var moreFlags []bool
+
+	_, err := vtg.StreamExecuteMulti(ctx, nil, session, "select id from user where id = 1; select id from user where id = 1", func(qr sqltypes.QueryResponse, more bool, firstPacket bool) error {
+		if qr.QueryError != nil {
+			return qr.QueryError
+		}
+		if firstPacket {
+			moreFlags = append(moreFlags, more)
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, false}, moreFlags)
+	require.EqualValues(t, 2, sbc1.ExecCount.Load())
+	require.Zero(t, sbc2.ExecCount.Load())
+}
+
 // TestVSchemaStats makes sure the building and displaying of the
 // VSchemaStats works.
 func TestVSchemaStats(t *testing.T) {
@@ -1768,6 +1833,41 @@ func TestGetPlanCacheNormalized(t *testing.T) {
 	})
 }
 
+// TestGetPlanCacheSetVarHintOrder checks that a session carrying several variables
+// in the SET_VAR hint plans the same query once: the hint is part of the plan cache
+// key and of the query sent to the tablet, so it must render the same way on every
+// request.
+func TestGetPlanCacheSetVarHintOrder(t *testing.T) {
+	r, sbc1, _, _, _ := createExecutorEnvWithConfig(t, createExecutorConfigWithNormalizer())
+	session := econtext.NewSafeSession(&vtgatepb.Session{
+		TargetString: "@primary",
+		SystemVariables: map[string]string{
+			"sql_safe_updates":        "1",
+			"unique_checks":           "0",
+			"sql_mode":                "'ANSI'",
+			"max_execution_time":      "100",
+			"big_tables":              "1",
+			"join_buffer_size":        "262144",
+			"sort_buffer_size":        "262144",
+			"group_concat_max_len":    "4096",
+			"div_precision_increment": "6",
+		},
+	})
+
+	const query = "select id from `user` where id = 1"
+	for i := range 20 {
+		_, err := executorExecSession(t.Context(), r, session, query, nil)
+		require.NoError(t, err)
+		require.Equal(t, 1, r.plans.Len(), "request %d added a plan cache entry", i+1)
+		require.Len(t, sbc1.Queries, i+1)
+		require.Equal(t, sbc1.Queries[0].Sql, sbc1.Queries[i].Sql, "request %d sent different query text", i+1)
+	}
+	assert.Equal(t, "select /*+ SET_VAR(big_tables = 1) SET_VAR(div_precision_increment = 6) SET_VAR(group_concat_max_len = 4096) "+
+		"SET_VAR(join_buffer_size = 262144) SET_VAR(max_execution_time = 100) SET_VAR(sort_buffer_size = 262144) "+
+		"SET_VAR(sql_mode = 'ANSI') SET_VAR(sql_safe_updates = 1) SET_VAR(unique_checks = 0) */ id from `user` where id = :id /* INT64 */",
+		sbc1.Queries[0].Sql)
+}
+
 func TestGetPlanNormalized(t *testing.T) {
 	r, _, _, _, ctx := createExecutorEnvWithConfig(t, createExecutorConfigWithNormalizer())
 
@@ -1807,7 +1907,6 @@ func TestGetPlanNormalized(t *testing.T) {
 }
 
 func TestGetPlanPriority(t *testing.T) {
-
 	testCases := []struct {
 		name             string
 		sql              string
@@ -1839,7 +1938,6 @@ func TestGetPlanPriority(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestPassthroughDDL(t *testing.T) {
@@ -2059,7 +2157,7 @@ func TestOlapSelectDatabase(t *testing.T) {
 		cbInvoked = true
 		return nil
 	}
-	err := executor.StreamExecute(context.Background(), nil, "TestExecute", econtext.NewSafeSession(session), sql, nil, cb)
+	err := executor.StreamExecute(context.Background(), nil, "TestExecute", econtext.NewSafeSession(session), sql, nil, false, cb)
 	assert.NoError(t, err)
 	assert.True(t, cbInvoked)
 }
@@ -2423,6 +2521,19 @@ func TestExecutorOtherAdmin(t *testing.T) {
 	}
 }
 
+// TestExecutorRewritesDoubleSlashComments checks that a statement that vtgate
+// forwards as written reaches the tablet with each "//" comment rewritten to
+// "#/", so that MySQL skips the text that Vitess skipped.
+func TestExecutorRewritesDoubleSlashComments(t *testing.T) {
+	executor, _, _, sbclookup, _ := createExecutorEnv(t)
+
+	_, err := executorExec(t.Context(), executor, &vtgatepb.Session{TargetString: KsTestUnsharded}, "repair table t1 //*x*/ , t2\n", nil)
+	require.NoError(t, err)
+	queries := sbclookup.GetQueries()
+	require.Len(t, queries, 1)
+	assert.Equal(t, "repair table t1 #/*x*/ , t2", queries[0].Sql)
+}
+
 func TestExecutorSavepointInTx(t *testing.T) {
 	executor, sbc1, sbc2, _, _ := createExecutorEnv(t)
 
@@ -2546,7 +2657,8 @@ func TestExecutorSavepointInTxWithReservedConn(t *testing.T) {
 		{Sql: "savepoint a", BindVariables: emptyBV},
 		{Sql: "savepoint b", BindVariables: emptyBV},
 		{Sql: "release savepoint a", BindVariables: emptyBV},
-		{Sql: "select /*+ SET_VAR(sql_mode = ' ') */ id from `user` where id = 3", BindVariables: emptyBV}}
+		{Sql: "select /*+ SET_VAR(sql_mode = ' ') */ id from `user` where id = 3", BindVariables: emptyBV},
+	}
 
 	utils.MustMatch(t, sbc1WantQueries, sbc1.Queries, "")
 	utils.MustMatch(t, sbc2WantQueries, sbc2.Queries, "")
@@ -2729,7 +2841,7 @@ func TestExecutorVExplainQueries(t *testing.T) {
 	// Test the streaming side as well
 	var results []sqltypes.Row
 	session = econtext.NewAutocommitSession(&vtgatepb.Session{})
-	err = executor.StreamExecute(ctx, nil, "TestExecutorVExplainQueries", session, "vexplain queries select * from user where name = 'apa'", nil, func(result *sqltypes.Result) error {
+	err = executor.StreamExecute(ctx, nil, "TestExecutorVExplainQueries", session, "vexplain queries select * from user where name = 'apa'", nil, false, func(result *sqltypes.Result) error {
 		results = append(results, result.Rows...)
 		return nil
 	})
@@ -2779,7 +2891,6 @@ func TestExecutorStartTxnStmt(t *testing.T) {
 
 			_, err = executorExecSession(ctx, executor, session, "rollback", nil)
 			require.NoError(t, err)
-
 		})
 	}
 }
@@ -2918,11 +3029,11 @@ func TestExecutorTruncateErrors(t *testing.T) {
 	_, err := executorExecSession(ctx, executor, session, "invalid statement", nil)
 	assert.EqualError(t, err, "syntax error at posi [TRUNCATED]")
 
-	err = executor.StreamExecute(ctx, nil, "TestExecute", session, "invalid statement", nil, fn)
+	err = executor.StreamExecute(ctx, nil, "TestExecute", session, "invalid statement", nil, false, fn)
 	assert.EqualError(t, err, "syntax error at posi [TRUNCATED]")
 
 	_, _, err = executor.Prepare(context.Background(), "TestExecute", session, "invalid statement")
-	assert.EqualError(t, err, "[BUG] unrecognized p [TRUNCATED]")
+	assert.EqualError(t, err, "syntax error at posi [TRUNCATED]")
 }
 
 func TestExecutorFlushStmt(t *testing.T) {
@@ -3027,7 +3138,7 @@ func TestExecutorKillStmt(t *testing.T) {
 		})
 		t.Run("stream:"+tc.query+tc.errStr, func(t *testing.T) {
 			mysqlCtx := &fakeMysqlConnection{ErrMsg: tc.errStr}
-			err := executor.StreamExecute(context.Background(), mysqlCtx, "TestExecutorKillStmt", econtext.NewAutocommitSession(&vtgatepb.Session{}), tc.query, nil, func(result *sqltypes.Result) error {
+			err := executor.StreamExecute(context.Background(), mysqlCtx, "TestExecutorKillStmt", econtext.NewAutocommitSession(&vtgatepb.Session{}), tc.query, nil, false, func(result *sqltypes.Result) error {
 				return nil
 			})
 			if tc.errStr != "" {
@@ -3091,7 +3202,8 @@ func TestExecutorShowShards(t *testing.T) {
 				Fields: buildVarCharFields("Shards"),
 				Rows:   nil,
 			},
-		}, {
+		},
+		{
 			name: "No filtering",
 			srvTopoServer: &fakesrvtopo.FakeSrvTopo{
 				SrvKeyspaceNamesOutput: map[string][]string{
@@ -3183,7 +3295,8 @@ func TestExecutorShowShards(t *testing.T) {
 					buildVarCharRow("ks1/80-"),
 				},
 			},
-		}, {
+		},
+		{
 			name: "Shard filtering",
 			srvTopoServer: &fakesrvtopo.FakeSrvTopo{
 				SrvKeyspaceNamesOutput: map[string][]string{

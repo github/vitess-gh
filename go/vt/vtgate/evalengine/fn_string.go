@@ -19,6 +19,7 @@ package evalengine
 import (
 	"bytes"
 	"math"
+	"slices"
 
 	"vitess.io/vitess/go/mysql/capabilities"
 	"vitess.io/vitess/go/mysql/collations"
@@ -735,7 +736,7 @@ func reverse(in *evalBytes) []byte {
 
 	out, end := make([]byte, len(b)), len(b)
 	for len(b) > 0 {
-		_, size := cs.DecodeRune(b)
+		_, size, _ := cs.DecodeRune(b)
 		copy(out[end-size:end], b[:size])
 		b = b[size:]
 		end -= size
@@ -828,7 +829,7 @@ func charOrd(b []byte, coll collations.ID) int64 {
 		return 0
 	}
 	cs := colldata.Lookup(coll).Charset()
-	_, l := cs.DecodeRune(b)
+	_, l, _ := cs.DecodeRune(b)
 	var r int64
 	for i := 0; i < l; i++ {
 		r = (r << 8) | int64(b[i])
@@ -1261,18 +1262,19 @@ func (call *builtinPad) eval(env *ExpressionEnv) (eval, error) {
 	repeat := (int(length) - strLen) / runeLen
 	remainder := (int(length) - strLen) % runeLen
 
-	var res []byte
-	if !call.left {
-		res = text.bytes
-	}
-
-	res = append(res, bytes.Repeat(pad.bytes, repeat)...)
+	padding := bytes.Repeat(pad.bytes, repeat)
 	if remainder > 0 {
-		res = append(res, charset.Slice(cs, pad.bytes, 0, remainder)...)
+		padding = append(padding, charset.Slice(cs, pad.bytes, 0, remainder)...)
 	}
 
+	var res []byte
 	if call.left {
-		res = append(res, text.bytes...)
+		res = append(padding, text.bytes...)
+	} else {
+		// The result needs its own buffer: text.bytes is borrowed from the
+		// input row or a bind variable, where the next value follows it in
+		// memory.
+		res = slices.Concat(text.bytes, padding)
 	}
 
 	return newEvalText(res, text.col), nil
@@ -1623,7 +1625,7 @@ func (call *builtinSubstring) compile(c *compiler) (ctype, error) {
 		if err != nil {
 			return ctype{}, err
 		}
-		skip2 = c.compileNullCheck2(str, l)
+		skip2 = c.compileNullCheckArg(l, 2)
 		_ = c.compileToInt64(l, 1)
 		c.asm.Fn_SUBSTRING3(tt, cs, col)
 	} else {
@@ -1692,7 +1694,7 @@ func (call *builtinLocate) compile(c *compiler) (ctype, error) {
 		return ctype{}, err
 	}
 
-	skip2 := c.compileNullCheck1(str)
+	skip2 := c.compileNullCheck1r(str)
 	var skip3 *jump
 
 	if !str.isTextual() {
@@ -1720,7 +1722,7 @@ func (call *builtinLocate) compile(c *compiler) (ctype, error) {
 		if err != nil {
 			return ctype{}, err
 		}
-		skip3 = c.compileNullCheck1(l)
+		skip3 = c.compileNullCheckArg(l, 2)
 		_ = c.compileToInt64(l, 1)
 	}
 

@@ -8,7 +8,12 @@ on:
       - "main"
       - "release-[0-9]+.[0-9]"
 
-permissions: read-all
+concurrency:
+  group: format('{0}-{1}', ${{ github.ref }}, 'Docker Lite Build Check')
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   generate-matrix:
@@ -40,7 +45,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9 # v2.14.1
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
         with:
           egress-policy: audit
 
