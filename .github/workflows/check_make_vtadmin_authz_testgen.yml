@@ -45,7 +45,7 @@ jobs:
 
     - name: Tune the OS
       if: steps.changes.outputs.vtadmin_changes == 'true'
-      uses: $/.github/actions/tune-os
+      uses: ./.github/actions/tune-os
 
     - name: Set up Go
       # zizmor: ignore[cache-poisoning] this workflow publishes no artifacts

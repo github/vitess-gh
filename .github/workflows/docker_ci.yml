@@ -73,7 +73,7 @@ jobs:
 
       - name: Build bootstrap images
         if: steps.changes.outputs.end_to_end == 'true'
-        uses: $/.github/actions/build-bootstrap
+        uses: ./.github/actions/build-bootstrap
         with:
           bootstrap-version: ${{ env.BOOTSTRAP_VERSION }}
           bootstrap-flavor: ${{ env.BOOTSTRAP_FLAVOR }}
